@@ -3,4 +3,6 @@ dist/
 build/
 .env
 *.log
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
 ~$*.md

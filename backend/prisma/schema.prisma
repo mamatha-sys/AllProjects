@@ -3,67 +3,26 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-enum Role {
-  SUPER_ADMIN
-  ADMIN
-  MANAGER
-  ASSISTANT_MANAGER
-  STL
-  TL
-  RECRUITER
-  BDE
-  CLIENT
-  ACCOUNTANT
-  EMPLOYEE
-}
-
-enum Priority {
-  HIGH
-  MEDIUM
-  LOW
-}
-
-enum RequirementStatus {
-  OPEN
-  CLOSED
-}
-
-enum ApplicationStage {
-  NEW
-  RECRUITER_REVIEW
-  RECRUITER_APPROVED
-  WITH_BDE
-  BDE_APPROVED
-  SHARED_WITH_CLIENT
-  CLIENT_REVIEW
-  CLIENT_SHORTLISTED
-  INTERVIEW_SCHEDULED
-  INTERVIEW_COMPLETED
-  SELECTED
-  OFFER
-  OFFER_ACCEPTED
-  JOINED
-  HIRED
-  REJECTED
-  HOLD
-}
-
-enum InterviewStatus {
-  SCHEDULED
-  COMPLETED
-  CANCELLED
-}
+// SQLite has no native enum support in Prisma, so these are plain strings.
+// Valid values, enforced in application code (see backend/src/routes):
+// Role: SUPER_ADMIN | ADMIN | MANAGER | ASSISTANT_MANAGER | STL | TL | RECRUITER | BDE | CLIENT | ACCOUNTANT | EMPLOYEE
+// Priority: HIGH | MEDIUM | LOW
+// RequirementStatus: OPEN | CLOSED
+// ApplicationStage: NEW | RECRUITER_REVIEW | RECRUITER_APPROVED | WITH_BDE | BDE_APPROVED | SHARED_WITH_CLIENT |
+//   CLIENT_REVIEW | CLIENT_SHORTLISTED | INTERVIEW_SCHEDULED | INTERVIEW_COMPLETED | SELECTED | OFFER |
+//   OFFER_ACCEPTED | JOINED | HIRED | REJECTED | HOLD
+// InterviewStatus: SCHEDULED | COMPLETED | CANCELLED
 
 model User {
   id             String   @id @default(cuid())
   name           String
   email          String   @unique
   passwordHash   String
-  role           Role
+  role           String
   atsDepartment  String?
   clientId       String?
   client         Client?  @relation(fields: [clientId], references: [id])
@@ -92,8 +51,8 @@ model Requirement {
   clientId      String
   client        Client             @relation(fields: [clientId], references: [id])
   department    String?
-  priority      Priority           @default(MEDIUM)
-  status        RequirementStatus  @default(OPEN)
+  priority      String             @default("MEDIUM")
+  status        String             @default("OPEN")
   recruiterId   String?
   recruiter     User?              @relation("RecruiterRequirements", fields: [recruiterId], references: [id])
   bdeId         String?
@@ -121,8 +80,8 @@ model Application {
   candidate     Candidate         @relation(fields: [candidateId], references: [id])
   requirementId String
   requirement   Requirement       @relation(fields: [requirementId], references: [id])
-  stage         ApplicationStage  @default(NEW)
-  interviewStatus   InterviewStatus?
+  stage         String            @default("NEW")
+  interviewStatus   String?
   interviewAt       DateTime?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
