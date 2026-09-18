@@ -14,12 +14,12 @@ const REPORTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ACCOUNTANT'];
 // roster, timesheet, expenses, access management, weekly ideas) lives as
 // tabs inside Performance & Development or Employee Services.
 const HR_ITEMS = [
-  { to: '/hrms', label: 'HRMS Dashboard' },
-  { to: '/attendance', label: 'Attendance & Time' },
-  { to: '/leave', label: 'Leave & Holidays' },
-  { to: '/payroll', label: 'Payroll & Compensation' },
-  { to: '/performance', label: 'Performance & Development' },
-  { to: '/employee-services', label: 'Employee Services' },
+  { to: '/hrms', label: 'HRMS Dashboard', icon: '📊' },
+  { to: '/attendance', label: 'Attendance & Time', icon: '⏱️' },
+  { to: '/leave', label: 'Leave & Holidays', icon: '🌴' },
+  { to: '/payroll', label: 'Payroll & Compensation', icon: '💰' },
+  { to: '/performance', label: 'Performance & Development', icon: '🎯' },
+  { to: '/employee-services', label: 'Employee Services', icon: '🛎️' },
 ];
 
 function groupsForRole(role) {
@@ -31,11 +31,11 @@ function groupsForRole(role) {
     groups.push({
       label: 'ATS',
       items: [
-        { to: '/requirements', label: 'Requirements' },
-        { to: '/clients', label: 'Clients' },
-        { to: '/candidates', label: 'Candidates' },
-        { to: '/ats/team', label: 'Recruiter & BDE' },
-        { to: '/ats/calendar', label: 'Interview Calendar' },
+        { to: '/requirements', label: 'Requirements', icon: '📋' },
+        { to: '/clients', label: 'Clients', icon: '🏢' },
+        { to: '/candidates', label: 'Candidates', icon: '👤' },
+        { to: '/ats/team', label: 'Recruiter & BDE', icon: '🤝' },
+        { to: '/ats/calendar', label: 'Interview Calendar', icon: '📅' },
       ],
     });
   }
@@ -43,9 +43,9 @@ function groupsForRole(role) {
     groups.push({
       label: 'Accounts',
       items: [
-        { to: '/invoices', label: 'Invoices' },
-        { to: '/office', label: 'Office / Business' },
-        { to: '/bank', label: 'Bank & Reconciliation' },
+        { to: '/invoices', label: 'Invoices', icon: '🧾' },
+        { to: '/office', label: 'Office / Business', icon: '🏬' },
+        { to: '/bank', label: 'Bank & Reconciliation', icon: '🏦' },
       ],
     });
   }
@@ -53,9 +53,9 @@ function groupsForRole(role) {
     groups.push({
       label: 'Reports',
       items: [
-        { to: '/reports/ats', label: 'ATS Reports' },
-        { to: '/reports/job-portal', label: 'Job Portal Reports' },
-        { to: '/reports/accounts', label: 'Accounts Reports' },
+        { to: '/reports/ats', label: 'ATS Reports', icon: '📈' },
+        { to: '/reports/job-portal', label: 'Job Portal Reports', icon: '🌐' },
+        { to: '/reports/accounts', label: 'Accounts Reports', icon: '💹' },
       ],
     });
   }
@@ -63,19 +63,24 @@ function groupsForRole(role) {
     groups.push({
       label: 'Administration',
       items: [
-        { to: '/admin/company', label: 'Company Setup' },
-        { to: '/admin/users', label: 'Users' },
-        { to: '/admin/roles', label: 'Role Catalog' },
-        { to: '/admin/integrations', label: 'Integrations' },
-        { to: '/admin/notifications', label: 'Notifications' },
-        { to: '/admin/audit', label: 'Audit Logs' },
-        { to: '/admin/profile', label: 'Profile' },
+        { to: '/admin/company', label: 'Company Setup', icon: '⚙️' },
+        { to: '/admin/users', label: 'Users', icon: '👥' },
+        { to: '/admin/roles', label: 'Role Catalog', icon: '🔐' },
+        { to: '/admin/integrations', label: 'Integrations', icon: '🔌' },
+        { to: '/admin/notifications', label: 'Notifications', icon: '🔔' },
+        { to: '/admin/audit', label: 'Audit Logs', icon: '📜' },
+        { to: '/admin/profile', label: 'Profile', icon: '🙍' },
       ],
     });
   } else {
-    groups.push({ label: 'Account', items: [{ to: '/admin/profile', label: 'Profile' }] });
+    groups.push({ label: 'Account', items: [{ to: '/admin/profile', label: 'Profile', icon: '🙍' }] });
   }
   return groups;
+}
+
+function initials(name) {
+  if (!name) return '?';
+  return name.replace(/\(.*\)/, '').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 }
 
 export default function Shell() {
@@ -94,25 +99,30 @@ export default function Shell() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="b1">TeamLink Consultants</div>
-          <div className="b2">TeamLink.Enterprise</div>
+          <div className="mark">TL</div>
+          <div>
+            <div className="b1">TeamLink Consultants</div>
+            <div className="b2">TeamLink.Enterprise</div>
+          </div>
         </div>
         <nav>
-          <NavLink to="/" end className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-            Dashboard
+          <NavLink to="/" end className={({ isActive }) => 'nav-item top-item' + (isActive ? ' active' : '')}>
+            <span className="nav-ico">🏠</span>Dashboard
           </NavLink>
           {groups.map((g) => (
             <div className="nav-group" key={g.label}>
               <div className="nav-group-label">{g.label}</div>
               {g.items.map((item) => (
                 <NavLink key={item.to} to={item.to} className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-                  {item.label}
+                  <span className="nav-ico">{item.icon}</span>{item.label}
                 </NavLink>
               ))}
             </div>
           ))}
           <div className="nav-group">
-            <a className="nav-item" href="/careers" target="_blank" rel="noreferrer">Job Portal (public) ↗</a>
+            <a className="nav-item" href="/careers" target="_blank" rel="noreferrer">
+              <span className="nav-ico">🚀</span>Job Portal (public) ↗
+            </a>
           </div>
         </nav>
       </aside>
@@ -124,7 +134,7 @@ export default function Shell() {
           </form>
           <div className="topbar-right">
             <span className="rolechip">{user?.role}</span>
-            <span>{user?.name}</span>
+            <div className="avatar">{initials(user?.name)}</div>
             <button className="btn btn-ghost" onClick={logout}>Sign Out</button>
           </div>
         </header>

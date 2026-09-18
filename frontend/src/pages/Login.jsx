@@ -43,7 +43,7 @@ export default function Login() {
           <input value={password} onChange={(e) => setPassword(e.target.value)} type="password" required />
         </label>
         {error && <div className="error-text">{error}</div>}
-        <button className="btn btn-primary" type="submit" disabled={busy}>
+        <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '10px 15px', fontSize: 14 }} type="submit" disabled={busy}>
           {busy ? 'Logging in…' : 'Log In'}
         </button>
         <div className="small-muted" style={{ marginTop: 10 }}>
