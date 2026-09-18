@@ -1,0 +1,72 @@
+import { useEffect, useState } from 'react';
+import api from '../../api';
+import { useAuth } from '../../context/AuthContext.jsx';
+
+const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+
+export default function Performance() {
+  const { user } = useAuth();
+  const isHR = HR_ROLES.includes(user?.role);
+  const [reviews, setReviews] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [form, setForm] = useState({ employeeId: '', period: '', score: '', notes: '' });
+
+  function load() {
+    api.get('/performance').then((res) => setReviews(res.data));
+  }
+  useEffect(() => {
+    load();
+    if (isHR) api.get('/employees').then((res) => setEmployees(res.data));
+  }, [isHR]);
+
+  async function submit(e) {
+    e.preventDefault();
+    await api.post('/performance', form);
+    setForm({ employeeId: '', period: '', score: '', notes: '' });
+    load();
+  }
+
+  return (
+    <div>
+      <div className="page-head"><h1>Performance & Development</h1></div>
+
+      {isHR && (
+        <form className="card section" onSubmit={submit}>
+          <h3>Record a review</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Employee</span>
+              <select required value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}>
+                <option value="">Select employee</option>
+                {employees.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+              </select>
+            </label>
+            <label className="field"><span>Period</span><input required placeholder="2026-H2" value={form.period} onChange={(e) => setForm({ ...form, period: e.target.value })} /></label>
+            <label className="field"><span>Score (0-100)</span><input required type="number" min="0" max="100" value={form.score} onChange={(e) => setForm({ ...form, score: e.target.value })} /></label>
+            <label className="field"><span>Notes</span><input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+          </div>
+          <button className="btn btn-primary btn-sm" type="submit">Save review</button>
+        </form>
+      )}
+
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr>{isHR && <th>Employee</th>}<th>Period</th><th>Score</th><th>Band</th><th>Recommendation</th><th>Notes</th></tr></thead>
+          <tbody>
+            {reviews.map((r) => (
+              <tr key={r.id}>
+                {isHR && <td>{r.employee?.name}</td>}
+                <td>{r.period}</td>
+                <td>{r.score}%</td>
+                <td><span className={`status ${r.band === 'High' ? 'priority-low' : r.band === 'Low' ? 'priority-high' : ''}`}>{r.band}</span></td>
+                <td>{r.recommendation}</td>
+                <td>{r.notes || '—'}</td>
+              </tr>
+            ))}
+            {reviews.length === 0 && <tr><td colSpan={isHR ? 6 : 5} className="small-muted">No reviews yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

@@ -34,4 +34,13 @@ router.get('/me', requireAuth, async (req, res) => {
   res.json({ id: user.id, name: user.name, email: user.email, role: user.role, atsDepartment: user.atsDepartment, clientId: user.clientId });
 });
 
+router.put('/me', requireAuth, async (req, res) => {
+  const { name, password } = req.body;
+  const data = {};
+  if (name) data.name = name;
+  if (password) data.passwordHash = await bcrypt.hash(password, 10);
+  const user = await prisma.user.update({ where: { id: req.user.id }, data });
+  res.json({ id: user.id, name: user.name, email: user.email, role: user.role });
+});
+
 module.exports = router;

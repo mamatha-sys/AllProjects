@@ -33,6 +33,7 @@ model User {
   requirementsAsBde       Requirement[] @relation("BdeRequirements")
   auditLogs               AuditLog[]
   employee                Employee?
+  notifications           Notification[]
 }
 
 model Client {
@@ -123,12 +124,40 @@ model Employee {
   location          String?
   dateOfJoining     DateTime?
   employmentStatus  String   @default("Active") // Active | Notice Period | Exit Process | Relieved
+  reportingManagerId String?
+  reportingManager    Employee?  @relation("ManagerReports", fields: [reportingManagerId], references: [id])
+  directReports       Employee[] @relation("ManagerReports")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  attendance    Attendance[]
-  leaveRequests LeaveRequest[]
-  payslips      Payslip[]
+  attendance         Attendance[]
+  leaveRequests      LeaveRequest[]
+  payslips           Payslip[]
+  records            EmployeeRecord[]
+  performanceReviews PerformanceReview[]
+  courseAssignments  CourseAssignment[]
+  projectAssignments ProjectAssignment[]
+  surveyResponses    SurveyResponse[]
+  acknowledgments    Acknowledgment[]
+}
+
+// Generic table backing the smaller, similarly-shaped HRMS self-service areas
+// (one Prisma model instead of ~11 near-identical ones): KT, Targets,
+// Resignation, Recognition, Disciplinary, Shift Roster, Timesheet, Assets,
+// Expense Claims, Helpdesk, Access Requests, Weekly Ideas.
+model EmployeeRecord {
+  id         String   @id @default(cuid())
+  type       String   // KT | TARGET | RESIGNATION | RECOGNITION | DISCIPLINARY | SHIFT | TIMESHEET | ASSET | EXPENSE | HELPDESK | ACCESS_REQUEST | WEEKLY_IDEA
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  title      String
+  detail     String?
+  status     String   @default("Open")
+  date       String?  // due date / shift date / timesheet date / expense date, as relevant
+  amount     Float?   // expense claim amount
+  hours      Float?   // timesheet hours
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model Attendance {
@@ -203,4 +232,157 @@ model BankTransaction {
   matched          Boolean  @default(false)
   matchedInvoiceId String?
   createdAt        DateTime @default(now())
+}
+
+model OfficeExpense {
+  id            String   @id @default(cuid())
+  category      String
+  location      String?
+  monthlyAmount Float
+  createdAt     DateTime @default(now())
+}
+
+// =============================================================================
+// HRMS — long tail
+// =============================================================================
+
+model PerformanceReview {
+  id             String   @id @default(cuid())
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id])
+  period         String   // e.g. "2026-H1"
+  score          Int      // 0-100
+  band           String   // High | Medium | Low
+  recommendation String   // Recommended | Not Recommended
+  notes          String?
+  createdAt      DateTime @default(now())
+}
+
+model Course {
+  id       String   @id @default(cuid())
+  title    String
+  category String?  // Onboarding | ATS | Compliance | Soft Skills
+  duration String?
+  createdAt DateTime @default(now())
+
+  assignments CourseAssignment[]
+}
+
+model CourseAssignment {
+  id         String   @id @default(cuid())
+  courseId   String
+  course     Course   @relation(fields: [courseId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  completed  Boolean  @default(false)
+  assignedAt DateTime @default(now())
+
+  @@unique([courseId, employeeId])
+}
+
+model Project {
+  id        String   @id @default(cuid())
+  name      String
+  status    String   @default("Active") // Active | Completed | On Hold
+  createdAt DateTime @default(now())
+
+  assignments ProjectAssignment[]
+}
+
+model ProjectAssignment {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  role       String?
+  assignedAt DateTime @default(now())
+
+  @@unique([projectId, employeeId])
+}
+
+model Survey {
+  id        String   @id @default(cuid())
+  title     String
+  status    String   @default("Active") // Active | Closed
+  questions String   // JSON-encoded array of question strings
+  createdAt DateTime @default(now())
+
+  responses SurveyResponse[]
+}
+
+model SurveyResponse {
+  id         String   @id @default(cuid())
+  surveyId   String
+  survey     Survey   @relation(fields: [surveyId], references: [id])
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  answers    String   // JSON-encoded array of answer strings
+  submittedAt DateTime @default(now())
+
+  @@unique([surveyId, employeeId])
+}
+
+model PolicyDocument {
+  id          String   @id @default(cuid())
+  title       String
+  category    String?  // Policy | Compliance
+  mandatory   Boolean  @default(false)
+  published   Boolean  @default(true)
+  target      String?  @default("All Employees")
+  uploadedDate String
+  createdAt   DateTime @default(now())
+
+  acknowledgments Acknowledgment[]
+}
+
+model Acknowledgment {
+  id           String         @id @default(cuid())
+  documentId   String
+  document     PolicyDocument @relation(fields: [documentId], references: [id])
+  employeeId   String
+  employee     Employee       @relation(fields: [employeeId], references: [id])
+  acknowledgedAt DateTime     @default(now())
+
+  @@unique([documentId, employeeId])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  category  String?  // Holiday | Policy | General
+  pinned    Boolean  @default(false)
+  target    String?  @default("All Employees")
+  date      String
+  createdAt DateTime @default(now())
+}
+
+model HrConfig {
+  id                            String @id @default(cuid())
+  freeLateArrivalsPerMonth      Int    @default(2)
+  freeEarlyLogoutsPerMonth      Int    @default(1)
+  earliestExcusableEarlyLogout  String @default("17:00")
+}
+
+// =============================================================================
+// ADMINISTRATION
+// =============================================================================
+
+model Company {
+  id      String @id @default(cuid())
+  name    String
+  email   String?
+  phone   String?
+  address String?
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  title     String
+  message   String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }

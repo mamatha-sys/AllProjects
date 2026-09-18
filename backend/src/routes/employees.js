@@ -18,8 +18,15 @@ router.get('/', requireRole(...HR_ROLES), async (req, res) => {
   const where = {};
   if (req.query.department) where.department = req.query.department;
   if (req.query.employmentStatus) where.employmentStatus = req.query.employmentStatus;
-  const employees = await prisma.employee.findMany({ where, orderBy: { name: 'asc' } });
+  const employees = await prisma.employee.findMany({ where, include: { reportingManager: true }, orderBy: { name: 'asc' } });
   res.json(employees);
+});
+
+router.put('/:id/manager', requireRole(...HR_ROLES), async (req, res) => {
+  const { reportingManagerId } = req.body;
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { reportingManagerId: reportingManagerId || null } });
+  await logAudit({ userId: req.user.id, action: 'Reporting manager set', entity: 'Employee', entityId: employee.id });
+  res.json(employee);
 });
 
 router.get('/:id', async (req, res) => {
