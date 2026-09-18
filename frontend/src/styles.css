@@ -29,9 +29,11 @@ body {
 .brand .b1 { font-size: 11px; color: #8b96b8; }
 .brand .b2 { font-weight: 600; font-size: 14.5px; color: #fff; }
 .sidebar nav { padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
-.nav-item { padding: 9px 12px; border-radius: 6px; color: #c3c9dd; text-decoration: none; font-size: 13.5px; cursor: pointer; }
+.nav-item { padding: 9px 12px; border-radius: 6px; color: #c3c9dd; text-decoration: none; font-size: 13.5px; cursor: pointer; display: block; }
 .nav-item:hover { background: rgba(255,255,255,.06); }
 .nav-item.active { background: var(--accent); color: #fff; }
+.nav-group { margin-top: 14px; }
+.nav-group-label { padding: 0 12px 4px; font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; color: #6d789c; }
 
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; background: #fff; border-bottom: 1px solid var(--line); }
@@ -91,3 +93,14 @@ tr:last-child td { border-bottom: none; }
 .login-card { background: #fff; border-radius: 14px; padding: 30px; width: 360px; display: flex; flex-direction: column; gap: 12px; }
 .logo-lockup { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .mark { width: 38px; height: 38px; border-radius: 8px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+
+.careers-shell { min-height: 100vh; background: var(--bg); }
+.careers-header { background: var(--navy-deep); padding: 16px 24px; }
+.careers-header .logo-lockup { margin-bottom: 0; color: #fff; }
+.careers-header .small-muted { color: #9aa3bd; }
+.careers-content { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+.careers-content h1 { margin-bottom: 4px; }
+.careers-list { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+.careers-card { display: block; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; text-decoration: none; color: var(--ink); }
+.careers-card:hover { border-color: var(--accent); }
+.careers-card-title { font-weight: 600; margin-bottom: 4px; }

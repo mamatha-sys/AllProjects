@@ -23,6 +23,12 @@ export default function Dashboard() {
         <Stat n={stats.interviewsScheduled} l="Interviews scheduled" />
         <Stat n={stats.hired} l="Hired this cycle" />
       </div>
+      <div className="statbar">
+        <Stat n={stats.activeEmployees} l="Active employees" />
+        <Stat n={stats.pendingLeave} l="Pending leave requests" />
+        <Stat n={stats.invoicesPending} l="Pending invoices" />
+        <Stat n={stats.invoicesOverdue} l="Overdue invoices" />
+      </div>
       <div className="card section">
         <h3>Recent activity</h3>
         <div className="timeline">

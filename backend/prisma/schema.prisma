@@ -32,6 +32,7 @@ model User {
   requirementsAsRecruiter Requirement[] @relation("RecruiterRequirements")
   requirementsAsBde       Requirement[] @relation("BdeRequirements")
   auditLogs               AuditLog[]
+  employee                Employee?
 }
 
 model Client {
@@ -43,11 +44,13 @@ model Client {
 
   requirements Requirement[]
   users        User[]
+  invoices     Invoice[]
 }
 
 model Requirement {
   id            String             @id @default(cuid())
   title         String
+  description   String?
   clientId      String
   client        Client             @relation(fields: [clientId], references: [id])
   department    String?
@@ -61,6 +64,7 @@ model Requirement {
   updatedAt     DateTime           @updatedAt
 
   applications Application[]
+  invoices     Invoice[]
 }
 
 model Candidate {
@@ -72,6 +76,7 @@ model Candidate {
   createdAt DateTime @default(now())
 
   applications Application[]
+  invoices     Invoice[]
 }
 
 model Application {
@@ -99,4 +104,103 @@ model AuditLog {
   fromValue String?
   toValue   String?
   createdAt DateTime @default(now())
+}
+
+// =============================================================================
+// HRMS
+// =============================================================================
+
+model Employee {
+  id                String   @id @default(cuid())
+  userId            String?  @unique
+  user              User?    @relation(fields: [userId], references: [id])
+  employeeCode      String   @unique
+  name              String
+  email             String?
+  phone             String?
+  department        String?
+  designation       String?
+  location          String?
+  dateOfJoining     DateTime?
+  employmentStatus  String   @default("Active") // Active | Notice Period | Exit Process | Relieved
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  attendance    Attendance[]
+  leaveRequests LeaveRequest[]
+  payslips      Payslip[]
+}
+
+model Attendance {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  date       String   // YYYY-MM-DD
+  status     String   // Present | Absent | Late | Half Day | Leave
+  checkIn    String?
+  checkOut   String?
+  createdAt  DateTime @default(now())
+
+  @@unique([employeeId, date])
+}
+
+model LeaveRequest {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  type       String   // Sick | Casual | Earned | Unpaid
+  fromDate   String
+  toDate     String
+  reason     String?
+  status     String   @default("Pending") // Pending | Approved | Rejected | Cancelled
+  createdAt  DateTime @default(now())
+  decidedAt  DateTime?
+}
+
+model Payslip {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  month      String   // YYYY-MM
+  basic      Float
+  hra        Float
+  allowances Float
+  deductions Float
+  netPay     Float
+  generatedAt DateTime @default(now())
+
+  @@unique([employeeId, month])
+}
+
+// =============================================================================
+// ACCOUNTS
+// =============================================================================
+
+model Invoice {
+  id              String    @id @default(cuid())
+  clientId        String
+  client          Client    @relation(fields: [clientId], references: [id])
+  candidateId     String?
+  candidate       Candidate? @relation(fields: [candidateId], references: [id])
+  requirementId   String?
+  requirement     Requirement? @relation(fields: [requirementId], references: [id])
+  amount          Float
+  gst             Float     @default(0)
+  tds             Float     @default(0)
+  status          String    @default("Pending") // Pending | Paid | Overdue
+  invoiceDate     String
+  dueDate         String?
+  paymentTerms    String?   @default("Net 30")
+  createdAt       DateTime  @default(now())
+}
+
+model BankTransaction {
+  id               String   @id @default(cuid())
+  date             String
+  description      String
+  type             String   // Credit | Debit
+  amount           Float
+  matched          Boolean  @default(false)
+  matchedInvoiceId String?
+  createdAt        DateTime @default(now())
 }

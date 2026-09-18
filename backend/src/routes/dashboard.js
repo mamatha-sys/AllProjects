@@ -6,7 +6,10 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.get('/', async (req, res) => {
-  const [openRequirements, recruiterReview, withBde, clientReview, interviewsScheduled, hired, auditLog] = await Promise.all([
+  const [
+    openRequirements, recruiterReview, withBde, clientReview, interviewsScheduled, hired, auditLog,
+    activeEmployees, pendingLeave, invoicesPending, invoicesOverdue,
+  ] = await Promise.all([
     prisma.requirement.count({ where: { status: 'OPEN' } }),
     prisma.application.count({ where: { stage: 'RECRUITER_REVIEW' } }),
     prisma.application.count({ where: { stage: 'WITH_BDE' } }),
@@ -14,6 +17,10 @@ router.get('/', async (req, res) => {
     prisma.application.count({ where: { stage: 'INTERVIEW_SCHEDULED' } }),
     prisma.application.count({ where: { stage: { in: ['JOINED', 'HIRED'] } } }),
     prisma.auditLog.findMany({ take: 8, orderBy: { createdAt: 'desc' }, include: { user: true } }),
+    prisma.employee.count({ where: { employmentStatus: 'Active' } }),
+    prisma.leaveRequest.count({ where: { status: 'Pending' } }),
+    prisma.invoice.count({ where: { status: 'Pending' } }),
+    prisma.invoice.count({ where: { status: 'Overdue' } }),
   ]);
 
   res.json({
@@ -23,6 +30,10 @@ router.get('/', async (req, res) => {
     clientReview,
     interviewsScheduled,
     hired,
+    activeEmployees,
+    pendingLeave,
+    invoicesPending,
+    invoicesOverdue,
     recentActivity: auditLog.map((a) => ({
       date: a.createdAt,
       user: a.user ? a.user.name : 'System',
