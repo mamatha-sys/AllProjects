@@ -7,6 +7,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 
 router.get('/me', async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { userId: req.user.id } });
@@ -30,7 +31,10 @@ router.put('/:id/manager', requireRole(...HR_ROLES), async (req, res) => {
 });
 
 router.get('/:id', async (req, res) => {
-  const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  const employee = await prisma.employee.findUnique({
+    where: { id: req.params.id },
+    include: { reportingManager: true, user: { select: { id: true, name: true, email: true, role: true } } },
+  });
   if (!employee) return res.status(404).json({ error: 'Employee not found' });
   if (req.user.role === 'EMPLOYEE' && employee.userId !== req.user.id) {
     return res.status(403).json({ error: "This isn't included in your role's permissions" });
@@ -55,6 +59,19 @@ router.put('/:id', requireRole(...HR_ROLES), async (req, res) => {
     data: { name, email, phone, department, designation, location, employmentStatus },
   });
   await logAudit({ userId: req.user.id, action: 'Employee updated', entity: 'Employee', entityId: employee.id });
+  res.json(employee);
+});
+
+// Links (or unlinks) this employee record to a login account — lets Administration
+// grant an employee self-service access without duplicating their profile data.
+router.put('/:id/link-user', requireRole(...ADMIN_ROLES), async (req, res) => {
+  const { userId } = req.body;
+  if (userId) {
+    const alreadyLinked = await prisma.employee.findFirst({ where: { userId, id: { not: req.params.id } } });
+    if (alreadyLinked) return res.status(409).json({ error: 'That user account is already linked to another employee' });
+  }
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { userId: userId || null } });
+  await logAudit({ userId: req.user.id, action: 'Employee linked to user account', entity: 'Employee', entityId: employee.id });
   res.json(employee);
 });
 
