@@ -8,60 +8,24 @@ const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CLIENT'];
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 const REPORTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ACCOUNTANT'];
 
-const HR_MANAGE_ITEMS = [
-  { to: '/employees', label: 'Employees' },
-  { to: '/attendance', label: 'Attendance' },
-  { to: '/leave', label: 'Leave' },
-  { to: '/payroll', label: 'Payroll' },
-  { to: '/performance', label: 'Performance' },
-  { to: '/lms', label: 'Learning (LMS)' },
-  { to: '/hrms/kt', label: 'Knowledge Transfer' },
-  { to: '/hrms/targets', label: 'Targets' },
-  { to: '/hrms/resignation', label: 'Resignation' },
-  { to: '/hrms/org-structure', label: 'Org Structure' },
-  { to: '/hrms/recognition', label: 'Recognition' },
-  { to: '/projects', label: 'Projects' },
-  { to: '/hrms/disciplinary', label: 'Disciplinary' },
-  { to: '/surveys', label: 'Surveys' },
-  { to: '/documents', label: 'Documents' },
-  { to: '/hrms/shift-roster', label: 'Shift Roster' },
-  { to: '/hrms/timesheet', label: 'Timesheet' },
-  { to: '/hrms/assets', label: 'Assets' },
-  { to: '/hrms/expenses', label: 'Expenses' },
-  { to: '/hrms/helpdesk', label: 'Helpdesk' },
-  { to: '/hrms/access-management', label: 'Access Management' },
-  { to: '/announcements', label: 'Announcements' },
-  { to: '/hrms/weekly-ideas', label: 'Weekly Ideas' },
-];
-
-const HR_SELF_SERVICE_ITEMS = [
-  { to: '/attendance', label: 'Attendance' },
-  { to: '/leave', label: 'Leave' },
-  { to: '/payroll', label: 'Payroll / Payslips' },
-  { to: '/performance', label: 'Performance' },
-  { to: '/lms', label: 'Learning (LMS)' },
-  { to: '/hrms/kt', label: 'Knowledge Transfer' },
-  { to: '/hrms/targets', label: 'Targets' },
-  { to: '/hrms/resignation', label: 'Resignation' },
-  { to: '/hrms/recognition', label: 'Recognition' },
-  { to: '/surveys', label: 'Surveys' },
-  { to: '/documents', label: 'Documents' },
-  { to: '/hrms/shift-roster', label: 'Shift Roster' },
-  { to: '/hrms/timesheet', label: 'Timesheet' },
-  { to: '/hrms/assets', label: 'My Assets' },
-  { to: '/hrms/expenses', label: 'Expense Claims' },
-  { to: '/hrms/helpdesk', label: 'Helpdesk' },
-  { to: '/hrms/access-management', label: 'Access Requests' },
-  { to: '/announcements', label: 'Announcements' },
-  { to: '/hrms/weekly-ideas', label: 'Weekly Ideas' },
+// Matches the prototype's HRMS sidebar exactly — six items. Everything else
+// (targets, recognition, KT, disciplinary, LMS, org structure, projects,
+// help desk, assets, announcements, surveys, resignation, documents, shift
+// roster, timesheet, expenses, access management, weekly ideas) lives as
+// tabs inside Performance & Development or Employee Services.
+const HR_ITEMS = [
+  { to: '/hrms', label: 'HRMS Dashboard' },
+  { to: '/attendance', label: 'Attendance & Time' },
+  { to: '/leave', label: 'Leave & Holidays' },
+  { to: '/payroll', label: 'Payroll & Compensation' },
+  { to: '/performance', label: 'Performance & Development' },
+  { to: '/employee-services', label: 'Employee Services' },
 ];
 
 function groupsForRole(role) {
   const groups = [];
-  if (HR_MANAGE_ROLES.includes(role)) {
-    groups.push({ label: 'HRMS', items: HR_MANAGE_ITEMS });
-  } else if (role === 'EMPLOYEE') {
-    groups.push({ label: 'HRMS', items: HR_SELF_SERVICE_ITEMS });
+  if (HR_MANAGE_ROLES.includes(role) || role === 'EMPLOYEE') {
+    groups.push({ label: 'HRMS', items: HR_ITEMS });
   }
   if (ATS_ROLES.includes(role)) {
     groups.push({

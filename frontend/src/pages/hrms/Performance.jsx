@@ -26,9 +26,22 @@ export default function Performance() {
     load();
   }
 
+  const avgScore = reviews.length ? Math.round(reviews.reduce((s, r) => s + r.score, 0) / reviews.length) : 0;
+  const bandCount = (band) => reviews.filter((r) => r.band === band).length;
+  const recCount = (rec) => reviews.filter((r) => r.recommendation === rec).length;
+
   return (
     <div>
-      <div className="page-head"><h1>Performance & Development</h1></div>
+      <div className="page-head"><h1>Performance Reports</h1></div>
+
+      <div className="statbar">
+        <div className="statitem"><div className="n">{avgScore}%</div><div className="l">Average Overall Score</div></div>
+        <div className="statitem"><div className="n">{bandCount('High')}</div><div className="l">High Performers</div></div>
+        <div className="statitem"><div className="n">{bandCount('Medium')}</div><div className="l">Medium Band</div></div>
+        <div className="statitem"><div className="n">{bandCount('Low')}</div><div className="l">Low Band</div></div>
+        <div className="statitem"><div className="n">{recCount('Recommended')}</div><div className="l">Salary Increase Recommended</div></div>
+        <div className="statitem"><div className="n">{recCount('Not Recommended')}</div><div className="l">Not Recommended</div></div>
+      </div>
 
       {isHR && (
         <form className="card section" onSubmit={submit}>

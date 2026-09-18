@@ -19,25 +19,9 @@ import EmployeeDetail from './pages/EmployeeDetail.jsx';
 import Attendance from './pages/Attendance.jsx';
 import Leave from './pages/Leave.jsx';
 import Payroll from './pages/Payroll.jsx';
-import Performance from './pages/hrms/Performance.jsx';
-import Lms from './pages/hrms/Lms.jsx';
-import Projects from './pages/hrms/Projects.jsx';
-import Surveys from './pages/hrms/Surveys.jsx';
-import Documents from './pages/hrms/Documents.jsx';
-import Announcements from './pages/hrms/Announcements.jsx';
-import OrgStructure from './pages/hrms/OrgStructure.jsx';
-import KT from './pages/hrms/KT.jsx';
-import Targets from './pages/hrms/Targets.jsx';
-import Resignation from './pages/hrms/Resignation.jsx';
-import Recognition from './pages/hrms/Recognition.jsx';
-import Disciplinary from './pages/hrms/Disciplinary.jsx';
-import ShiftRoster from './pages/hrms/ShiftRoster.jsx';
-import Timesheet from './pages/hrms/Timesheet.jsx';
-import Assets from './pages/hrms/Assets.jsx';
-import Expenses from './pages/hrms/Expenses.jsx';
-import Helpdesk from './pages/hrms/Helpdesk.jsx';
-import AccessManagement from './pages/hrms/AccessManagement.jsx';
-import WeeklyIdeas from './pages/hrms/WeeklyIdeas.jsx';
+import HrmsDashboard from './pages/hrms/HrmsDashboard.jsx';
+import PerformanceDevelopment from './pages/hrms/PerformanceDevelopment.jsx';
+import EmployeeServices from './pages/hrms/EmployeeServices.jsx';
 
 import Invoices from './pages/Invoices.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
@@ -78,31 +62,17 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
 
-        {/* HRMS */}
+        {/* HRMS — matches the prototype's 6-item sidebar; the long tail of
+            sub-features lives as tabs inside Performance & Development and
+            Employee Services (see those two pages). */}
+        <Route path="hrms" element={<HrmsDashboard />} />
         <Route path="employees" element={<Employees />} />
         <Route path="employees/:id" element={<EmployeeDetail />} />
         <Route path="attendance" element={<Attendance />} />
         <Route path="leave" element={<Leave />} />
         <Route path="payroll" element={<Payroll />} />
-        <Route path="performance" element={<Performance />} />
-        <Route path="lms" element={<Lms />} />
-        <Route path="projects" element={<Projects />} />
-        <Route path="surveys" element={<Surveys />} />
-        <Route path="documents" element={<Documents />} />
-        <Route path="announcements" element={<Announcements />} />
-        <Route path="hrms/org-structure" element={<OrgStructure />} />
-        <Route path="hrms/kt" element={<KT />} />
-        <Route path="hrms/targets" element={<Targets />} />
-        <Route path="hrms/resignation" element={<Resignation />} />
-        <Route path="hrms/recognition" element={<Recognition />} />
-        <Route path="hrms/disciplinary" element={<Disciplinary />} />
-        <Route path="hrms/shift-roster" element={<ShiftRoster />} />
-        <Route path="hrms/timesheet" element={<Timesheet />} />
-        <Route path="hrms/assets" element={<Assets />} />
-        <Route path="hrms/expenses" element={<Expenses />} />
-        <Route path="hrms/helpdesk" element={<Helpdesk />} />
-        <Route path="hrms/access-management" element={<AccessManagement />} />
-        <Route path="hrms/weekly-ideas" element={<WeeklyIdeas />} />
+        <Route path="performance" element={<PerformanceDevelopment />} />
+        <Route path="employee-services" element={<EmployeeServices />} />
 
         {/* ATS */}
         <Route path="requirements" element={<Requirements />} />
