@@ -14,6 +14,23 @@ router.use(requireAuth);
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
+// Manager/Assistant Manager/STL/TL are themselves employees — they see and act on
+// their own department only. Super Admin/Admin are unrestricted, company-wide.
+const DEPT_SCOPED_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+
+// Returns the requesting user's own department when their role is department-scoped,
+// or undefined when they have unrestricted (Super Admin/Admin) access.
+async function scopeDepartment(req) {
+  if (!DEPT_SCOPED_ROLES.includes(req.user.role)) return undefined;
+  const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });
+  return own?.department || '__no_department_assigned__';
+}
+
+async function assertInScope(req, employee) {
+  if (!DEPT_SCOPED_ROLES.includes(req.user.role)) return true;
+  const dept = await scopeDepartment(req);
+  return employee.department === dept;
+}
 
 const DEFAULT_ONBOARDING_TASKS = [
   'Offer letter signed', 'ID proof collected', 'PAN card collected',
@@ -121,13 +138,21 @@ router.post('/me/unlock-request', async (req, res) => {
 
 router.get('/', requireRole(...HR_ROLES), async (req, res) => {
   const where = {};
-  if (req.query.department) where.department = req.query.department;
   if (req.query.employmentStatus) where.employmentStatus = req.query.employmentStatus;
+  const scopedDept = await scopeDepartment(req);
+  if (scopedDept !== undefined) {
+    where.department = scopedDept; // department-scoped role: always restricted to their own department
+  } else if (req.query.department) {
+    where.department = req.query.department;
+  }
   const employees = await prisma.employee.findMany({ where, include: { reportingManager: true }, orderBy: { name: 'asc' } });
   res.json(employees.map(withComputed));
 });
 
 router.put('/:id/manager', requireRole(...HR_ROLES), async (req, res) => {
+  const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const { reportingManagerId } = req.body;
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { reportingManagerId: reportingManagerId || null } });
   await logAudit({ userId: req.user.id, action: 'Reporting manager set', entity: 'Employee', entityId: employee.id });
@@ -143,19 +168,24 @@ router.get('/:id', async (req, res) => {
   if (req.user.role === 'EMPLOYEE' && employee.userId !== req.user.id) {
     return res.status(403).json({ error: "This isn't included in your role's permissions" });
   }
+  if (!(await assertInScope(req, employee))) {
+    return res.status(403).json({ error: 'This record is outside your department scope' });
+  }
   res.json(withComputed(employee));
 });
 
 // Creates the employee record and — when a role + password are supplied — their
 // login account together, in one step (matching the reference app's combined flow).
 router.post('/', requireRole(...HR_ROLES), async (req, res) => {
-  let { employeeCode } = req.body;
-  const { name, email, phone, department, designation, location, dateOfJoining, dateOfBirth, gender, employeeType, role, password, branch } = req.body;
+  let { employeeCode, department } = req.body;
+  const { name, email, phone, designation, location, dateOfJoining, dateOfBirth, gender, employeeType, role, password, branch } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!employeeCode) {
     const count = await prisma.employee.count();
     employeeCode = 'EMP-' + String(count + 1).padStart(4, '0');
   }
+  const scopedDept = await scopeDepartment(req);
+  if (scopedDept !== undefined) department = scopedDept; // department-scoped role: can only add to their own department
 
   let userId = null;
   if (role && password) {
@@ -178,6 +208,9 @@ router.post('/', requireRole(...HR_ROLES), async (req, res) => {
 });
 
 router.put('/:id', requireRole(...HR_ROLES), async (req, res) => {
+  const existingForScope = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existingForScope) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existingForScope))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const editableFields = [
     'name', 'email', 'phone', 'department', 'designation', 'location', 'employmentStatus', 'employeeType',
     'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'address', 'addressType',
@@ -187,6 +220,7 @@ router.put('/:id', requireRole(...HR_ROLES), async (req, res) => {
   ];
   const data = {};
   editableFields.forEach((f) => { if (req.body[f] !== undefined) data[f] = req.body[f]; });
+  if (DEPT_SCOPED_ROLES.includes(req.user.role)) delete data.department; // move departments only via /transfer, which keeps an audit trail
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data });
   await logAudit({ userId: req.user.id, action: 'Employee updated', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(employee));
@@ -211,6 +245,7 @@ router.put('/:id/link-user', requireRole(...ADMIN_ROLES), async (req, res) => {
 router.patch('/:id/changes/approve', requireRole(...HR_ROLES), async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!employee || !employee.pendingChanges) return res.status(400).json({ error: 'No pending changes' });
+  if (!(await assertInScope(req, employee))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const changes = JSON.parse(employee.pendingChanges);
   const data = { pendingChanges: null, isLocked: true, profileStage: 'Locked' };
   changes.forEach((c) => { data[c.field] = c.to; });
@@ -220,6 +255,9 @@ router.patch('/:id/changes/approve', requireRole(...HR_ROLES), async (req, res) 
 });
 
 router.patch('/:id/changes/reject', requireRole(...HR_ROLES), async (req, res) => {
+  const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { pendingChanges: null, profileStage: 'Assigned' } });
   await logAudit({ userId: req.user.id, action: 'Profile changes sent back for edit', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(employee));
@@ -229,6 +267,7 @@ router.patch('/:id/changes/reject', requireRole(...HR_ROLES), async (req, res) =
 router.patch('/:id/unlock-request/approve', requireRole(...HR_ROLES), async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!employee || employee.unlockRequestStatus !== 'Pending') return res.status(400).json({ error: 'No pending unlock request' });
+  if (!(await assertInScope(req, employee))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const updated = await prisma.employee.update({
     where: { id: req.params.id },
     data: { isLocked: false, unlockRequestStatus: 'Approved', profileStage: 'Assigned' },
@@ -238,6 +277,9 @@ router.patch('/:id/unlock-request/approve', requireRole(...HR_ROLES), async (req
 });
 
 router.patch('/:id/unlock-request/reject', requireRole(...HR_ROLES), async (req, res) => {
+  const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { unlockRequestStatus: 'Rejected' } });
   await logAudit({ userId: req.user.id, action: 'Edit access request denied', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(employee));
@@ -248,6 +290,7 @@ router.patch('/:id/unlock-request/reject', requireRole(...HR_ROLES), async (req,
 router.patch('/:id/toggle-lock', requireRole(...HR_ROLES), async (req, res) => {
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const nextLocked = !existing.isLocked;
   const employee = await prisma.employee.update({
     where: { id: req.params.id },
@@ -262,6 +305,7 @@ router.patch('/:id/toggle-lock', requireRole(...HR_ROLES), async (req, res) => {
 router.patch('/:id/toggle-pause', requireRole(...HR_ROLES), async (req, res) => {
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const nextStatus = existing.employmentStatus === 'On Probation' ? 'Active' : 'On Probation';
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { employmentStatus: nextStatus } });
   await logAudit({ userId: req.user.id, action: 'Employee status toggled', entity: 'Employee', entityId: employee.id, fromValue: existing.employmentStatus, toValue: nextStatus });
@@ -274,6 +318,7 @@ router.post('/:id/transfer', requireRole(...HR_ROLES), async (req, res) => {
   if (!department) return res.status(400).json({ error: 'department is required' });
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { department } });
   await logAudit({ userId: req.user.id, action: 'Employee transferred' + (reason ? ` (${reason})` : ''), entity: 'Employee', entityId: employee.id, fromValue: existing.department, toValue: department });
   res.json(withComputed(employee));
@@ -283,6 +328,7 @@ router.post('/:id/transfer', requireRole(...HR_ROLES), async (req, res) => {
 router.patch('/:id/onboarding/:index', requireRole(...HR_ROLES), async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!employee) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, employee))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const tasks = employee.onboardingTasks ? JSON.parse(employee.onboardingTasks) : DEFAULT_ONBOARDING_TASKS.map((task) => ({ task, completed: false }));
   const idx = Number(req.params.index);
   if (!tasks[idx]) return res.status(400).json({ error: 'Invalid task index' });
@@ -295,6 +341,7 @@ router.patch('/:id/onboarding/:index', requireRole(...HR_ROLES), async (req, res
 router.post('/:id/offboarding', requireRole(...HR_ROLES), async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!employee) return res.status(404).json({ error: 'Employee not found' });
+  if (!(await assertInScope(req, employee))) return res.status(403).json({ error: 'This record is outside your department scope' });
   if (employee.offboardingStatus) return res.status(400).json({ error: 'Offboarding already in progress for this employee' });
   const updated = await prisma.employee.update({
     where: { id: req.params.id },
@@ -311,6 +358,7 @@ router.post('/:id/offboarding', requireRole(...HR_ROLES), async (req, res) => {
 router.patch('/:id/offboarding/:index', requireRole(...HR_ROLES), async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!employee || !employee.offboardingTasks) return res.status(400).json({ error: 'No offboarding in progress' });
+  if (!(await assertInScope(req, employee))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const tasks = JSON.parse(employee.offboardingTasks);
   const idx = Number(req.params.index);
   if (!tasks[idx]) return res.status(400).json({ error: 'Invalid task index' });
@@ -332,6 +380,7 @@ router.post('/bulk-import', requireRole(...HR_ROLES), async (req, res) => {
   if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows must be an array' });
   let imported = 0, skipped = 0;
   let seq = await prisma.employee.count();
+  const scopedDept = await scopeDepartment(req);
   for (const r of rows) {
     if (!r.name) { skipped++; continue; }
     if (r.email) {
@@ -343,7 +392,7 @@ router.post('/bulk-import', requireRole(...HR_ROLES), async (req, res) => {
       data: {
         employeeCode: 'EMP-' + String(seq).padStart(4, '0'),
         name: r.name, email: r.email || null, phone: r.phone || null,
-        department: r.department || null, designation: r.designation || null, location: r.location || null,
+        department: scopedDept !== undefined ? scopedDept : (r.department || null), designation: r.designation || null, location: r.location || null,
         onboardingTasks: JSON.stringify(DEFAULT_ONBOARDING_TASKS.map((task) => ({ task, completed: false }))),
       },
     });
