@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api';
 
-import { ALL_STAGE_CODES, stageLabel, requirementStatusLabel } from '../atsVocab';
+import { ALL_STAGE_CODES, stageLabel, requirementStatusLabel, REJECT_SIDES, REJECT_REASON_CATEGORIES, HOLD_REASON_CATEGORIES } from '../atsVocab';
 
 const RAISE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'TL', 'STL', 'ASSISTANT_MANAGER'];
 
@@ -22,6 +22,10 @@ export default function RequirementDetail() {
   const [linkCandidateId, setLinkCandidateId] = useState('');
   const [error, setError] = useState('');
   const [matchDetail, setMatchDetail] = useState(null);
+  const [rejectTarget, setRejectTarget] = useState(null);
+  const [rejectForm, setRejectForm] = useState({ side: '', reasonCategory: '', detail: '', comment: '' });
+  const [holdTarget, setHoldTarget] = useState(null);
+  const [holdForm, setHoldForm] = useState({ reasonCategory: '', reviewDate: '', comment: '' });
 
   function load() {
     api.get(`/requirements/${id}`).then((res) => setRequirement(res.data));
@@ -33,12 +37,57 @@ export default function RequirementDetail() {
   }, [id]);
 
   async function setStage(applicationId, stage) {
+    if (stage === 'REJECTED') { openReject(applicationId); return; }
+    if (stage === 'HOLD') { openHold(applicationId); return; }
     setError('');
     try {
       await api.patch(`/applications/${applicationId}/stage`, { stage });
       load();
     } catch (err) {
       setError(err.response?.data?.error || 'Could not change stage');
+    }
+  }
+
+  function openReject(applicationId) {
+    setRejectTarget(applicationId);
+    setRejectForm({ side: '', reasonCategory: '', detail: '', comment: '' });
+  }
+
+  async function confirmReject() {
+    setError('');
+    try {
+      await api.patch(`/applications/${rejectTarget}/reject`, rejectForm);
+      setRejectTarget(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not reject this application');
+    }
+  }
+
+  function openHold(applicationId) {
+    setHoldTarget(applicationId);
+    const reviewDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    setHoldForm({ reasonCategory: '', reviewDate, comment: '' });
+  }
+
+  async function confirmHold() {
+    setError('');
+    try {
+      await api.patch(`/applications/${holdTarget}/hold`, holdForm);
+      setHoldTarget(null);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not put this application on hold');
+    }
+  }
+
+  async function resumeHold(applicationId) {
+    setError('');
+    try {
+      await api.patch(`/applications/${applicationId}/resume-hold`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not resume this application');
     }
   }
 
@@ -193,9 +242,15 @@ export default function RequirementDetail() {
                   <td><span className="status">{stageLabel(a.stage)}</span></td>
                   <td>{a.matchScore != null ? `${a.matchScore}%` : a.resumeScore != null ? `${a.resumeScore}%` : '—'}</td>
                   <td>
-                    <select value={a.stage} onChange={(e) => setStage(a.id, e.target.value)}>
-                      {ALL_STAGE_CODES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
-                    </select>
+                    {a.stage === 'HOLD' ? (
+                      <button className="btn btn-sm" onClick={() => resumeHold(a.id)}>Resume to Previous Stage</button>
+                    ) : a.stage === 'REJECTED' ? (
+                      <span className="small-muted">Reason: {a.rejectedDetail || '—'}</span>
+                    ) : (
+                      <select value={a.stage} onChange={(e) => setStage(a.id, e.target.value)}>
+                        {ALL_STAGE_CODES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
+                      </select>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -206,6 +261,61 @@ export default function RequirementDetail() {
           </table>
         </div>
       </div>
+
+      {rejectTarget && (
+        <div className="card section" style={{ borderColor: 'var(--warn)' }}>
+          <h3>Reject application</h3>
+          <div className="notice" style={{ marginBottom: 10 }}>Rejecting closes this application only. The candidate stays Active in the Candidate Master and remains searchable for other requirements.</div>
+          <div className="grid-2">
+            <label className="field">
+              <span>Rejected Side*</span>
+              <select value={rejectForm.side} onChange={(e) => setRejectForm({ ...rejectForm, side: e.target.value })}>
+                <option value="">Select</option>
+                {REJECT_SIDES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span>Reason Category*</span>
+              <select value={rejectForm.reasonCategory} onChange={(e) => setRejectForm({ ...rejectForm, reasonCategory: e.target.value })}>
+                <option value="">Select</option>
+                {REJECT_REASON_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="field"><span>Detailed Reason*</span>
+            <textarea rows="2" value={rejectForm.detail} onChange={(e) => setRejectForm({ ...rejectForm, detail: e.target.value })} placeholder="Required — kept on the candidate's rejection history" />
+          </label>
+          <label className="field"><span>Comments</span>
+            <textarea rows="2" value={rejectForm.comment} onChange={(e) => setRejectForm({ ...rejectForm, comment: e.target.value })} />
+          </label>
+          <button className="btn btn-sm" onClick={() => setRejectTarget(null)}>Cancel</button>{' '}
+          <button className="btn btn-sm btn-primary" onClick={confirmReject}>Confirm Rejection</button>
+        </div>
+      )}
+
+      {holdTarget && (
+        <div className="card section" style={{ borderColor: 'var(--warn)' }}>
+          <h3>Put on hold</h3>
+          <div className="notice" style={{ marginBottom: 10 }}>A hold is reversible — "Resume to Previous Stage" puts the candidate back exactly where they were.</div>
+          <div className="grid-2">
+            <label className="field">
+              <span>Hold Reason*</span>
+              <select value={holdForm.reasonCategory} onChange={(e) => setHoldForm({ ...holdForm, reasonCategory: e.target.value })}>
+                <option value="">Select</option>
+                {HOLD_REASON_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="field"><span>Review Date</span>
+              <input type="date" value={holdForm.reviewDate} onChange={(e) => setHoldForm({ ...holdForm, reviewDate: e.target.value })} />
+            </label>
+          </div>
+          <label className="field"><span>Comment</span>
+            <textarea rows="2" value={holdForm.comment} onChange={(e) => setHoldForm({ ...holdForm, comment: e.target.value })} />
+          </label>
+          <button className="btn btn-sm" onClick={() => setHoldTarget(null)}>Cancel</button>{' '}
+          <button className="btn btn-sm btn-primary" onClick={confirmHold}>Put on Hold</button>
+        </div>
+      )}
 
       {matchDetail && (
         <div className="card section" style={{ borderColor: 'var(--warn)' }}>

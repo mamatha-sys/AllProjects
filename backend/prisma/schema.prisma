@@ -242,10 +242,43 @@ model Application {
   // Client joining -> Accounts hand-off (prototype confirmClientJoining).
   offeredCtc        Float?
   joiningDate       String?
+
+  // Structured rejection — captured once, when stage moves to REJECTED
+  // (openRejectModal/confirmReject). The candidate itself is never deleted or
+  // blocked from other requirements; only this one application closes.
+  rejectedSide           String? // Recruiter | BDE | Client | Internal
+  rejectedReasonCategory String?
+  rejectedDetail         String?
+  rejectedComment        String?
+  rejectedStageBefore    String?
+  rejectedAt             DateTime?
+
+  // Structured hold — reversible via "Resume to Previous Stage"
+  // (openHoldModal/confirmHold/resumeFromHold).
+  holdReasonCategory  String?
+  holdReviewDate      String?
+  holdComment         String?
+  holdStageBefore     String?
+  holdAt              DateTime?
+  holdResumedAt       DateTime?
+
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
+  notes         ApplicationNote[]
+
   @@unique([candidateId, requirementId])
+}
+
+// Internal-only notes on a candidate's application (openAddNoteModal / Notes tab
+// on Candidate Detail) — never visible to the candidate or client.
+model ApplicationNote {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+  text          String
+  authorName    String?
+  createdAt     DateTime    @default(now())
 }
 
 model AuditLog {

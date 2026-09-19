@@ -11,6 +11,10 @@ const TABS = [
   ['applications', 'Applications'],
   ['matching', 'Matching Requirements'],
   ['interviews', 'Interviews'],
+  ['activity', 'Activity Timeline'],
+  ['rejections', 'Rejection History'],
+  ['holds', 'Hold History'],
+  ['notes', 'Notes'],
 ];
 
 function lifeClass(status) {
@@ -24,23 +28,54 @@ export default function CandidateDetail() {
   const { id } = useParams();
   const [candidate, setCandidate] = useState(null);
   const [tab, setTab] = useState('overview');
+  const [notes, setNotes] = useState([]);
+  const [noteText, setNoteText] = useState('');
+
+  function load() {
+    api.get(`/candidates/${id}`).then((res) => setCandidate(res.data));
+  }
+  useEffect(load, [id]);
 
   useEffect(() => {
-    api.get(`/candidates/${id}`).then((res) => setCandidate(res.data));
-  }, [id]);
+    const apps = candidate?.applications || [];
+    if (!apps.length) { setNotes([]); return; }
+    Promise.all(apps.map((a) => api.get(`/applications/${a.id}/notes`).then((res) => res.data.map((n) => ({ ...n, application: a }))).catch(() => [])))
+      .then((lists) => setNotes(lists.flat().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))));
+  }, [candidate]);
+
+  async function addNote() {
+    if (!noteText.trim() || !candidate.applications?.length) return;
+    // Notes are per-application; a candidate with more than one application
+    // logs the note against their most recently updated one.
+    const target = [...candidate.applications].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
+    await api.post(`/applications/${target.id}/notes`, { text: noteText });
+    setNoteText('');
+    load();
+  }
 
   if (!candidate) return <div className="small-muted">Loading…</div>;
 
   const applications = candidate.applications || [];
   const matching = candidate.matchingRequirements || [];
   const interviews = applications.filter((a) => a.interviewStatus);
+  const rejections = applications.filter((a) => a.rejectedAt);
+  const holds = applications.filter((a) => a.holdAt);
+  const activity = applications
+    .flatMap((a) => {
+      const events = [{ date: a.createdAt, label: `Added to pipeline — ${a.requirement.title}` }];
+      if (a.rejectedAt) events.push({ date: a.rejectedAt, label: `Rejected (${a.rejectedSide || '—'}) — ${a.requirement.title}` });
+      if (a.holdAt) events.push({ date: a.holdAt, label: `Put on hold — ${a.requirement.title}` });
+      if (a.holdResumedAt) events.push({ date: a.holdResumedAt, label: `Resumed from hold — ${a.requirement.title}` });
+      return events;
+    })
+    .sort((x, y) => new Date(y.date) - new Date(x.date));
 
   return (
     <div>
       <Link className="small-muted" to="/candidates">← Back to candidates</Link>
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
-          <h1>{candidate.name}</h1>
+          <h1>{candidate.name} {candidate.source === 'Job Portal' && <span className="status connected">Synced from Job Portal</span>}</h1>
           <div className="page-sub">
             {[
               candidate.id,
@@ -99,6 +134,9 @@ export default function CandidateDetail() {
         </div>
       )}
 
+      {tab === 'applications' && rejections.length > 0 && (
+        <div className="notice" style={{ marginBottom: 10 }}>This candidate has a rejection on record but remains active and searchable for other requirements — profiles are never deleted on rejection.</div>
+      )}
       {tab === 'applications' && (
         <div className="tbl-wrap">
           <table>
@@ -169,6 +207,83 @@ export default function CandidateDetail() {
             </div>
           ))}
           {interviews.length === 0 && <div className="small-muted">No interviews yet.</div>}
+        </div>
+      )}
+
+      {tab === 'activity' && (
+        <div className="card section">
+          <h3>Activity Timeline</h3>
+          {activity.map((e, i) => (
+            <div className="kv" key={i}>
+              <span className="k">{new Date(e.date).toLocaleString()}</span>
+              <span>{e.label}</span>
+            </div>
+          ))}
+          {activity.length === 0 && <div className="small-muted">No activity yet.</div>}
+        </div>
+      )}
+
+      {tab === 'rejections' && (
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Requirement</th><th>Client</th><th>Previous Stage</th><th>Side</th><th>Reason Category</th><th>Detailed Reason</th><th>Date / Time</th><th>Comments</th></tr></thead>
+            <tbody>
+              {rejections.map((a) => (
+                <tr key={a.id}>
+                  <td><Link to={`/requirements/${a.requirement.id}`}>{a.requirement.title}</Link></td>
+                  <td>{a.requirement.client?.name || '—'}</td>
+                  <td>{stageLabel(a.rejectedStageBefore) || '—'}</td>
+                  <td>{a.rejectedSide || '—'}</td>
+                  <td>{a.rejectedReasonCategory || '—'}</td>
+                  <td>{a.rejectedDetail || '—'}</td>
+                  <td>{new Date(a.rejectedAt).toLocaleString()}</td>
+                  <td className="small-muted">{a.rejectedComment || '—'}</td>
+                </tr>
+              ))}
+              {rejections.length === 0 && <tr><td colSpan="8" className="small-muted">No rejections on record.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'holds' && (
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Requirement</th><th>Previous Stage</th><th>Hold Reason</th><th>Hold Date</th><th>Review Date</th><th>Comment</th><th>Status</th></tr></thead>
+            <tbody>
+              {holds.map((a) => (
+                <tr key={a.id}>
+                  <td><Link to={`/requirements/${a.requirement.id}`}>{a.requirement.title}</Link></td>
+                  <td>{stageLabel(a.holdStageBefore) || '—'}</td>
+                  <td>{a.holdReasonCategory || '—'}</td>
+                  <td>{new Date(a.holdAt).toLocaleDateString()}</td>
+                  <td>{a.holdReviewDate || '—'}</td>
+                  <td className="small-muted">{a.holdComment || '—'}</td>
+                  <td><span className={`status ${a.holdResumedAt ? 'priority-low' : 'priority-medium'}`}>{a.holdResumedAt ? 'Resumed' : 'On Hold'}</span></td>
+                </tr>
+              ))}
+              {holds.length === 0 && <tr><td colSpan="7" className="small-muted">No holds on record.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab === 'notes' && (
+        <div className="card section">
+          <h3>Internal notes</h3>
+          <div className="small-muted" style={{ marginBottom: 10 }}>Not visible to the candidate or client.</div>
+          <textarea rows="3" style={{ width: '100%', padding: 8, borderRadius: 7, border: '1px solid var(--line)' }}
+            placeholder="Add internal note" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+          <button className="btn btn-sm btn-primary" style={{ marginTop: 8 }} onClick={addNote}>Add Note</button>
+          <div style={{ marginTop: 14 }}>
+            {notes.map((n) => (
+              <div className="kv" key={n.id}>
+                <span className="k">{new Date(n.createdAt).toLocaleString()} · {n.authorName || '—'}</span>
+                <span>{n.text}</span>
+              </div>
+            ))}
+            {notes.length === 0 && <div className="small-muted">No notes yet.</div>}
+          </div>
         </div>
       )}
     </div>

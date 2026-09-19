@@ -248,6 +248,18 @@ const CANDIDATE_FILTER_SOURCES = [
 ];
 const APPLICATION_METHODS = ['Manual', 'Auto-Apply'];
 
+// Reject / Hold modals (openRejectModal/openHoldModal).
+const REJECT_SIDES = ['Recruiter', 'BDE', 'Client', 'Internal'];
+const REJECT_REASON_CATEGORIES = [
+  'Skill gap', 'Experience mismatch', 'Salary expectation mismatch', 'Location constraint',
+  'Notice period too long', 'Candidate not interested', 'Client hired another candidate',
+  'Communication / soft skills', 'Other',
+];
+const HOLD_REASON_CATEGORIES = [
+  'Requirement on hold by client', 'Budget approval pending', 'Awaiting candidate confirmation',
+  'Better-fit candidate in pipeline', 'Document / background check pending', 'Other',
+];
+
 // Client-side lists (prototype openAddClientModal, line 7296).
 const CLIENT_INDUSTRIES = [
   'IT', 'Healthcare', 'Manufacturing', 'Education', 'Finance', 'Retail', 'Logistics', 'Other',
@@ -318,6 +330,9 @@ module.exports = {
   CANDIDATE_FIRST_SOURCES,
   CANDIDATE_FILTER_SOURCES,
   APPLICATION_METHODS,
+  REJECT_SIDES,
+  REJECT_REASON_CATEGORIES,
+  HOLD_REASON_CATEGORIES,
   CLIENT_INDUSTRIES,
   CLIENT_STATUSES,
   CLIENT_TYPES,

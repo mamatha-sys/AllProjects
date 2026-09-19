@@ -138,6 +138,17 @@ export const CANDIDATE_FILTER_SOURCES = [
 ];
 export const APPLICATION_METHODS = ['Manual', 'Auto-Apply'];
 
+export const REJECT_SIDES = ['Recruiter', 'BDE', 'Client', 'Internal'];
+export const REJECT_REASON_CATEGORIES = [
+  'Skill gap', 'Experience mismatch', 'Salary expectation mismatch', 'Location constraint',
+  'Notice period too long', 'Candidate not interested', 'Client hired another candidate',
+  'Communication / soft skills', 'Other',
+];
+export const HOLD_REASON_CATEGORIES = [
+  'Requirement on hold by client', 'Budget approval pending', 'Awaiting candidate confirmation',
+  'Better-fit candidate in pipeline', 'Document / background check pending', 'Other',
+];
+
 export const CLIENT_INDUSTRIES = [
   'IT', 'Healthcare', 'Manufacturing', 'Education', 'Finance', 'Retail', 'Logistics', 'Other',
 ];

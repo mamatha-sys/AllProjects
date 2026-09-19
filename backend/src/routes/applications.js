@@ -144,6 +144,8 @@ router.post('/', requireRole(...PIPELINE_ROLES), async (req, res) => {
 router.patch('/:id/stage', async (req, res) => {
   const { stage, interviewAt } = req.body;
   if (!stage) return res.status(400).json({ error: 'stage is required' });
+  if (stage === 'REJECTED') return res.status(400).json({ error: 'Use PATCH /:id/reject — a detailed reason is required.' });
+  if (stage === 'HOLD') return res.status(400).json({ error: 'Use PATCH /:id/hold — a hold reason is required.' });
 
   const allowedRoles = STAGE_OWNERS[stage];
   if (!allowedRoles) return res.status(400).json({ error: 'Unknown stage' });
@@ -205,6 +207,98 @@ router.patch('/:id/stage', async (req, res) => {
   });
 
   res.json(application);
+});
+
+// Reject — closes this application only, with a structured reason kept on the
+// candidate's rejection history. The candidate stays Active and searchable
+// for other requirements (openRejectModal/confirmReject).
+router.patch('/:id/reject', async (req, res) => {
+  const { side, reasonCategory, detail, comment } = req.body;
+  if (!detail || !detail.trim()) return res.status(400).json({ error: 'A detailed reason is required.' });
+  const existing = await prisma.application.findUnique({
+    where: { id: req.params.id },
+    include: { candidate: true, requirement: { include: { client: true } } },
+  });
+  if (!existing) return res.status(404).json({ error: 'Application not found' });
+  const allowedRoles = STAGE_OWNERS.REJECTED;
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(req.user.role);
+  if (!isAdmin && !allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({ error: "Rejecting isn't included in your role's permissions" });
+  }
+
+  const application = await prisma.application.update({
+    where: { id: req.params.id },
+    data: {
+      stage: 'REJECTED',
+      rejectedSide: side || null,
+      rejectedReasonCategory: reasonCategory || null,
+      rejectedDetail: detail,
+      rejectedComment: comment || null,
+      rejectedStageBefore: existing.stage,
+      rejectedAt: new Date(),
+    },
+  });
+  await logAudit({ userId: req.user.id, action: 'Application rejected', entity: 'Application', entityId: application.id, fromValue: existing.stage, toValue: 'Rejected' });
+  res.json(application);
+});
+
+// Hold — reversible; "Resume to Previous Stage" restores exactly where it was
+// (openHoldModal/confirmHold/resumeFromHold).
+router.patch('/:id/hold', async (req, res) => {
+  const { reasonCategory, reviewDate, comment } = req.body;
+  if (!reasonCategory) return res.status(400).json({ error: 'A hold reason is required.' });
+  const existing = await prisma.application.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Application not found' });
+  const allowedRoles = STAGE_OWNERS.HOLD;
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(req.user.role);
+  if (!isAdmin && !allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({ error: "Placing on hold isn't included in your role's permissions" });
+  }
+
+  const application = await prisma.application.update({
+    where: { id: req.params.id },
+    data: {
+      stage: 'HOLD',
+      holdReasonCategory: reasonCategory,
+      holdReviewDate: reviewDate || offsetDate(null, 7),
+      holdComment: comment || null,
+      holdStageBefore: existing.stage,
+      holdAt: new Date(),
+      holdResumedAt: null,
+    },
+  });
+  await logAudit({ userId: req.user.id, action: 'Application put on hold', entity: 'Application', entityId: application.id, fromValue: existing.stage, toValue: 'Hold' });
+  res.json(application);
+});
+
+router.patch('/:id/resume-hold', async (req, res) => {
+  const existing = await prisma.application.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Application not found' });
+  if (existing.stage !== 'HOLD' || !existing.holdStageBefore) {
+    return res.status(400).json({ error: 'No hold record to resume from.' });
+  }
+  const application = await prisma.application.update({
+    where: { id: req.params.id },
+    data: { stage: existing.holdStageBefore, holdResumedAt: new Date() },
+  });
+  await logAudit({ userId: req.user.id, action: 'Application resumed from hold', entity: 'Application', entityId: application.id, fromValue: 'Hold', toValue: existing.holdStageBefore });
+  res.json(application);
+});
+
+// Internal-only notes (Candidate Detail > Notes tab) — never visible to the
+// candidate or client.
+router.get('/:id/notes', async (req, res) => {
+  const notes = await prisma.applicationNote.findMany({ where: { applicationId: req.params.id }, orderBy: { createdAt: 'desc' } });
+  res.json(notes);
+});
+
+router.post('/:id/notes', async (req, res) => {
+  const text = (req.body.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Note text is required' });
+  const note = await prisma.applicationNote.create({
+    data: { applicationId: req.params.id, text, authorName: req.user.name || req.user.email || null },
+  });
+  res.status(201).json(note);
 });
 
 module.exports = router;
