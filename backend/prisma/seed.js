@@ -18,7 +18,17 @@ async function main() {
     ],
   });
 
-  const orbit = await prisma.client.create({ data: { name: 'Orbit Software Solutions', industry: 'IT', location: 'Hyderabad' } });
+  // Orbit's service agreement is already signed, so its requirements can be
+  // activated; Medivant's has not been raised yet.
+  const orbit = await prisma.client.create({
+    data: {
+      name: 'Orbit Software Solutions', industry: 'IT', location: 'Hyderabad',
+      agreementId: 'AGR0001', agreementStatus: 'SIGNED', agreementFeePercent: 8.33,
+      agreementDocument: 'TEAMLINK CONSULTANTS\nRECRUITMENT / STAFFING SERVICES AGREEMENT\nClient: Orbit Software Solutions (IT)\n\n(Seeded sample — use “Regenerate document” on the client page for the full text.)',
+      esignToken: 'ESN-SEEDORBIT0001', agreementSentAt: new Date('2026-09-01'),
+      agreementSignedAt: new Date('2026-09-03'), agreementSignedBy: 'Ravi Teja', agreementSignedByTitle: 'Head of Talent',
+    },
+  });
   const medivant = await prisma.client.create({ data: { name: 'Medivant Healthcare', industry: 'Medical', location: 'Bengaluru' } });
 
   const admin = await prisma.user.create({
@@ -48,6 +58,7 @@ async function main() {
       title: 'Senior Backend Engineer',
       description: 'Own the core services team building TeamLink’s backend platform. 5+ years Node.js/PostgreSQL experience.',
       clientId: orbit.id, department: 'IT', priority: 'HIGH', recruiterId: recruiter.id, bdeId: bde.id,
+      skills: 'Node.js, PostgreSQL, REST', experience: '5-8', openings: 2,
     },
   });
   const req2 = await prisma.requirement.create({
@@ -55,16 +66,37 @@ async function main() {
       title: 'Staff Nurse',
       description: 'ICU-experienced staff nurse for a 200-bed multi-specialty hospital. Night shift rotation.',
       clientId: medivant.id, department: 'Medical', priority: 'MEDIUM',
+      skills: 'ICU, Patient Care', experience: '2-5',
+    },
+  });
+  // Raised but not yet activated — Medivant's agreement isn't signed, so
+  // "Activate requirement" on this one is correctly refused.
+  await prisma.requirement.create({
+    data: {
+      title: 'Radiology Technician',
+      clientId: medivant.id, department: 'Medical', priority: 'LOW', status: 'DRAFT',
+      skills: 'Radiology, CT', experience: '3-6',
     },
   });
 
-  const cand1 = await prisma.candidate.create({ data: { name: 'Arjun Mehta', email: 'arjun@example.com', phone: '9000000001', source: 'Naukri' } });
-  const cand2 = await prisma.candidate.create({ data: { name: 'Priya Sharma', email: 'priya@example.com', phone: '9000000002', source: 'LinkedIn' } });
-  const cand3 = await prisma.candidate.create({ data: { name: 'Rahul Verma', email: 'rahul@example.com', phone: '9000000003', source: 'TeamLink Website' } });
+  const cand1 = await prisma.candidate.create({
+    data: { name: 'Arjun Mehta', email: 'arjun@example.com', phone: '9000000001', source: 'Naukri', skills: 'Node.js, PostgreSQL, REST, Docker', experienceYears: 6 },
+  });
+  const cand2 = await prisma.candidate.create({
+    data: { name: 'Priya Sharma', email: 'priya@example.com', phone: '9000000002', source: 'LinkedIn', skills: 'Node.js, PostgreSQL, GraphQL', experienceYears: 7 },
+  });
+  const cand3 = await prisma.candidate.create({
+    data: { name: 'Rahul Verma', email: 'rahul@example.com', phone: '9000000003', source: 'TeamLink Website', skills: 'ICU, Patient Care', experienceYears: 4 },
+  });
+  // Not linked to anything yet — shows up under "Suggested candidates" on the
+  // Senior Backend Engineer requirement.
+  await prisma.candidate.create({
+    data: { name: 'Sneha Kulkarni', email: 'sneha@example.com', phone: '9000000004', source: 'Naukri', skills: 'Node.js, PostgreSQL, REST, Redis', experienceYears: 5 },
+  });
 
   await prisma.application.create({ data: { candidateId: cand1.id, requirementId: req1.id, stage: 'RECRUITER_REVIEW' } });
   await prisma.application.create({ data: { candidateId: cand2.id, requirementId: req1.id, stage: 'WITH_BDE' } });
-  await prisma.application.create({ data: { candidateId: cand3.id, requirementId: req2.id, stage: 'NEW' } });
+  await prisma.application.create({ data: { candidateId: cand3.id, requirementId: req2.id, stage: 'AI_INTERVIEW_SCHEDULED' } });
 
   // HRMS
   const ONBOARDING = ['Offer letter signed', 'ID proof collected', 'PAN card collected', 'Laptop/asset assigned', 'Reporting manager introduction', 'System access provisioned'];

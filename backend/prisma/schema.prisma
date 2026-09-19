@@ -11,11 +11,13 @@ datasource db {
 // Valid values, enforced in application code (see backend/src/routes):
 // Role: SUPER_ADMIN | ADMIN | MANAGER | ASSISTANT_MANAGER | STL | TL | RECRUITER | BDE | CLIENT | ACCOUNTANT | EMPLOYEE
 // Priority: HIGH | MEDIUM | LOW
-// RequirementStatus: OPEN | CLOSED
-// ApplicationStage: NEW | RECRUITER_REVIEW | RECRUITER_APPROVED | WITH_BDE | BDE_APPROVED | SHARED_WITH_CLIENT |
+// RequirementStatus: DRAFT | OPEN | CLOSED
+// ApplicationStage: NEW | AI_INTERVIEW_REQUIRED | AI_INTERVIEW_SCHEDULED | AI_INTERVIEW_COMPLETED |
+//   RECRUITER_REVIEW | RECRUITER_APPROVED | WITH_BDE | BDE_APPROVED | SHARED_WITH_CLIENT |
 //   CLIENT_REVIEW | CLIENT_SHORTLISTED | INTERVIEW_SCHEDULED | INTERVIEW_COMPLETED | SELECTED | OFFER |
 //   OFFER_ACCEPTED | JOINED | HIRED | REJECTED | HOLD
 // InterviewStatus: SCHEDULED | COMPLETED | CANCELLED
+// AgreementStatus: NOT_SENT | DRAFT | SENT | VIEWED | SIGNED
 
 model User {
   id             String   @id @default(cuid())
@@ -43,6 +45,20 @@ model Client {
   location  String?
   createdAt DateTime @default(now())
 
+  // Service agreement / e-sign flow. The document is generated from the client
+  // record, sent for signature, then confirmed either by the client's own login
+  // or through the tokenised public signing link (see routes/public.js).
+  agreementId        String?   @unique // human-readable reference, e.g. AGR0001
+  agreementStatus    String    @default("NOT_SENT") // NOT_SENT | DRAFT | SENT | VIEWED | SIGNED
+  agreementDocument  String? // generated agreement text
+  agreementFeePercent Float?   @default(8.33) // placement fee, % of annual CTC
+  esignToken         String?   @unique // opaque token in the client-facing signing link
+  agreementSentAt    DateTime?
+  agreementViewedAt  DateTime?
+  agreementSignedAt  DateTime?
+  agreementSignedBy  String? // full name typed at e-sign time
+  agreementSignedByTitle String? // signatory designation
+
   requirements Requirement[]
   users        User[]
   invoices     Invoice[]
@@ -56,7 +72,10 @@ model Requirement {
   client        Client             @relation(fields: [clientId], references: [id])
   department    String?
   priority      String             @default("MEDIUM")
-  status        String             @default("OPEN")
+  status        String             @default("OPEN") // DRAFT | OPEN | CLOSED
+  skills        String? // comma-separated must-have skills, drives candidate matching + JD
+  experience    String? // e.g. "5-8" years, shown on the generated job description
+  openings      Int                @default(1)
   recruiterId   String?
   recruiter     User?              @relation("RecruiterRequirements", fields: [recruiterId], references: [id])
   bdeId         String?
@@ -74,6 +93,8 @@ model Candidate {
   email     String?
   phone     String?
   source    String?  @default("TeamLink Website")
+  skills    String? // comma-separated, scored against Requirement.skills for match suggestions
+  experienceYears Float?
   createdAt DateTime @default(now())
 
   applications Application[]

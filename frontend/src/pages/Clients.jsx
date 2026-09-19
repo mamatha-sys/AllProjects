@@ -52,7 +52,7 @@ export default function Clients() {
       <div className="tbl-wrap">
         <table>
           <thead>
-            <tr><th>Name</th><th>Industry</th><th>Location</th></tr>
+            <tr><th>Name</th><th>Industry</th><th>Location</th><th>Agreement</th></tr>
           </thead>
           <tbody>
             {clients.map((c) => (
@@ -60,9 +60,10 @@ export default function Clients() {
                 <td><Link to={`/clients/${c.id}`}>{c.name}</Link></td>
                 <td>{c.industry || '—'}</td>
                 <td>{c.location || '—'}</td>
+                <td><span className="status">{(c.agreementStatus || 'NOT_SENT').replace(/_/g, ' ')}</span></td>
               </tr>
             ))}
-            {clients.length === 0 && <tr><td colSpan="3" className="small-muted">No clients yet.</td></tr>}
+            {clients.length === 0 && <tr><td colSpan="4" className="small-muted">No clients yet.</td></tr>}
           </tbody>
         </table>
       </div>

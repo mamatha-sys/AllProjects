@@ -98,7 +98,15 @@ function groupsForRole(role) {
       ],
     });
   } else {
-    groups.push({ label: 'Account', items: [{ to: '/admin/profile', label: 'Profile', icon: '🙍' }] });
+    // Non-admins now receive in-app notifications too (ATS stage changes,
+    // agreement signing), so the inbox belongs in everyone's sidebar.
+    groups.push({
+      label: 'Account',
+      items: [
+        { to: '/admin/notifications', label: 'Notifications', icon: '🔔' },
+        { to: '/admin/profile', label: 'Profile', icon: '🙍' },
+      ],
+    });
   }
   return groups;
 }
