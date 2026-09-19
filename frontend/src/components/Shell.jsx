@@ -1,114 +1,119 @@
-import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
+import { atsRoleLabel } from '../atsVocab';
+
+// ---------------------------------------------------------------------------
+// Nav structure is the prototype's, verbatim: SECTION_LABEL (line 2065) and
+// SUBNAV (line 2176) from teamlink-enterprise_69.html. Only the `to` paths are
+// this app's React Router paths — labels, grouping and ordering are the
+// prototype's. Entries marked `extra` are screens this app has that the
+// prototype's nav lacks; they are appended to the group they belong to rather
+// than orphaned.
+// ---------------------------------------------------------------------------
+const SECTION_LABEL = {
+  dashboard: 'Dashboard', hrms: 'HRMS', ats: 'ATS',
+  accounts: 'Accounts', admin: 'Administration', reports: 'Reports',
+};
 
 const HR_MANAGE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
-// Manager/Assistant Manager/STL/TL are themselves employees (with their own
-// profile to fill in) — so they get the "My Profile" link that plain HR
-// admins don't. This is a nav-only grouping; it's separate from which of
-// these roles are restricted to their own department for data access (see
-// DEPT_SCOPED_ROLES in backend/src/routes/employees.js — Manager/Assistant
-// Manager have cross-department oversight, only STL/TL are department-scoped).
 const TEAM_LEAD_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 const ATS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL', 'RECRUITER', 'BDE', 'CLIENT'];
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CLIENT'];
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 const REPORTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ACCOUNTANT'];
 
-// Matches the prototype's HRMS sidebar exactly — six items. Everything else
-// (targets, recognition, KT, disciplinary, LMS, org structure, projects,
-// help desk, assets, announcements, surveys, resignation, documents, shift
-// roster, timesheet, expenses, access management, weekly ideas) lives as
-// tabs inside Performance & Development or Employee Services.
-const HR_ITEMS = [
-  { to: '/hrms', label: 'HRMS Dashboard', icon: '📊' },
-  { to: '/attendance', label: 'Attendance & Time', icon: '⏱️' },
-  { to: '/leave', label: 'Leave & Holidays', icon: '🌴' },
-  { to: '/payroll', label: 'Payroll & Compensation', icon: '💰' },
-  { to: '/performance', label: 'Performance & Development', icon: '🎯' },
-  { to: '/employee-services', label: 'Employee Services', icon: '🛎️' },
+const HRMS_ITEMS = [
+  ['/hrms', 'HRMS Dashboard'],
+  ['/attendance', 'Attendance & Time'],
+  ['/leave', 'Leave & Holidays'],
+  ['/payroll', 'Payroll & Compensation'],
+  ['/performance', 'Performance & Development'],
+  ['/employee-services', 'Employee Services'],
+];
+// Employees (and the leads who are also employees) keep their own fill-in
+// profile link — a main-only screen the prototype's sidebar has no slot for.
+const HRMS_ITEMS_EMPLOYEE = [
+  ['/hrms', 'HRMS Dashboard'],
+  ['/my-profile', 'My Profile'],
+  ...HRMS_ITEMS.slice(1),
 ];
 
-// Employees (and Manager/Assistant Manager/STL/TL, who are employees too) get
-// a direct link to their own fill-in-the-full-form profile (distinct from the
-// login-settings "Profile" under Account) — plain HR admins use Employee
-// Management under Administration instead and don't need this link.
-const HR_ITEMS_EMPLOYEE = [
-  { to: '/hrms', label: 'HRMS Dashboard', icon: '📊' },
-  { to: '/my-profile', label: 'My Profile', icon: '🧑‍💼' },
-  { to: '/attendance', label: 'Attendance & Time', icon: '⏱️' },
-  { to: '/leave', label: 'Leave & Holidays', icon: '🌴' },
-  { to: '/payroll', label: 'Payroll & Compensation', icon: '💰' },
-  { to: '/performance', label: 'Performance & Development', icon: '🎯' },
-  { to: '/employee-services', label: 'Employee Services', icon: '🛎️' },
+const ATS_ITEMS = [
+  ['/ats/dashboard', 'Dashboard'],
+  ['/requirements', 'Jobs / Requirements'],
+  ['/clients', 'Clients'],
+  ['/candidates', 'Candidates & Pipeline'],
+  ['/ats/team', 'Recruiter & BDE'],
+  ['/ats/calendar', 'Interview Calendar'],
 ];
 
+const ACCOUNTS_ITEMS = [
+  ['/accounts/dashboard', 'Dashboard'],
+  ['/office', 'Office / Business'],
+  ['/invoices', 'Invoices'],
+  ['/bank', 'Bank & Reconciliation'],
+];
+
+const ADMIN_ITEMS = [
+  ['/admin/company', 'Company Setup'],
+  // main-only: Departments & Teams admin (kept — it is the backing data for
+  // the department-scoped guards).
+  ['/admin/departments', 'Departments & Teams'],
+  ['/employees', 'Employee Management'],
+  ['/admin/users', 'Users'],
+  ['/admin/roles', 'Role Catalog'],
+  ['/admin/integrations', 'Integrations'],
+  ['/admin/org-structure', 'Organization Structure'],
+  ['/admin/notifications', 'Notifications'],
+  ['/admin/audit', 'Audit Logs'],
+  ['/admin/profile', 'Profile'],
+];
+
+const REPORTS_ITEMS = [
+  ['/reports/ats', 'ATS Reports'],
+  ['/reports/job-portal', 'Job Portal Reports'],
+  ['/reports/accounts', 'Accounts Reports'],
+];
+
+// Group render order is the prototype's sidebarHtml() order (line 2100):
+// HRMS, ATS, Accounts, Reports, Administration.
 function groupsForRole(role) {
   const groups = [];
   if (TEAM_LEAD_ROLES.includes(role) || role === 'EMPLOYEE') {
-    groups.push({ label: 'HRMS', items: HR_ITEMS_EMPLOYEE });
+    groups.push(['hrms', 'HRMS', HRMS_ITEMS_EMPLOYEE]);
   } else if (HR_MANAGE_ROLES.includes(role)) {
-    groups.push({ label: 'HRMS', items: HR_ITEMS });
+    groups.push(['hrms', 'HRMS', HRMS_ITEMS]);
   }
-  if (ATS_ROLES.includes(role)) {
-    groups.push({
-      label: 'ATS',
-      items: [
-        { to: '/requirements', label: 'Requirements', icon: '📋' },
-        { to: '/clients', label: 'Clients', icon: '🏢' },
-        { to: '/candidates', label: 'Candidates', icon: '👤' },
-        { to: '/ats/team', label: 'Recruiter & BDE', icon: '🤝' },
-        { to: '/ats/calendar', label: 'Interview Calendar', icon: '📅' },
-      ],
-    });
-  }
-  if (ACCOUNTS_ROLES.includes(role)) {
-    groups.push({
-      label: 'Accounts',
-      items: [
-        { to: '/invoices', label: 'Invoices', icon: '🧾' },
-        { to: '/office', label: 'Office / Business', icon: '🏬' },
-        { to: '/bank', label: 'Bank & Reconciliation', icon: '🏦' },
-      ],
-    });
-  }
-  if (REPORTS_ROLES.includes(role)) {
-    groups.push({
-      label: 'Reports',
-      items: [
-        { to: '/reports/ats', label: 'ATS Reports', icon: '📈' },
-        { to: '/reports/job-portal', label: 'Job Portal Reports', icon: '🌐' },
-        { to: '/reports/accounts', label: 'Accounts Reports', icon: '💹' },
-      ],
-    });
-  }
+  if (ATS_ROLES.includes(role)) groups.push(['ats', 'ATS', ATS_ITEMS]);
+  if (ACCOUNTS_ROLES.includes(role)) groups.push(['accounts', 'Accounts', ACCOUNTS_ITEMS]);
+  if (REPORTS_ROLES.includes(role)) groups.push(['reports', 'Reports', REPORTS_ITEMS]);
   if (ADMIN_ROLES.includes(role)) {
-    groups.push({
-      label: 'Administration',
-      items: [
-        { to: '/admin/company', label: 'Company Setup', icon: '⚙️' },
-        { to: '/admin/departments', label: 'Departments & Teams', icon: '🏭' },
-        { to: '/employees', label: 'Employee Management', icon: '🧑‍💼' },
-        { to: '/admin/users', label: 'Users', icon: '👥' },
-        { to: '/admin/roles', label: 'Role Catalog', icon: '🔐' },
-        { to: '/admin/integrations', label: 'Integrations', icon: '🔌' },
-        { to: '/admin/notifications', label: 'Notifications', icon: '🔔' },
-        { to: '/admin/audit', label: 'Audit Logs', icon: '📜' },
-        { to: '/admin/profile', label: 'Profile', icon: '🙍' },
-      ],
-    });
+    groups.push(['admin', 'Administration', ADMIN_ITEMS]);
   } else {
-    // Non-admins now receive in-app notifications too (ATS stage changes,
-    // agreement signing), so the inbox belongs in everyone's sidebar.
-    groups.push({
-      label: 'Account',
-      items: [
-        { to: '/admin/notifications', label: 'Notifications', icon: '🔔' },
-        { to: '/admin/profile', label: 'Profile', icon: '🙍' },
-      ],
-    });
+    // Non-admins still receive notifications and still own a profile — the
+    // prototype gives them nothing, so they get the two-item slice.
+    groups.push(['admin', 'Administration', [
+      ['/admin/notifications', 'Notifications'],
+      ['/admin/profile', 'Profile'],
+    ]]);
   }
   return groups;
+}
+
+// Which sidebar section a URL belongs to, so the group opens and the topbar
+// title / breadcrumb name the right section.
+const SECTION_OF_PATH = [
+  [/^\/(hrms|attendance|leave|payroll|performance|employee-services|my-profile)/, 'hrms'],
+  [/^\/(ats|requirements|clients|candidates)/, 'ats'],
+  [/^\/(accounts|invoices|bank|office)/, 'accounts'],
+  [/^\/reports/, 'reports'],
+  [/^\/(admin|employees)/, 'admin'],
+];
+function sectionOf(pathname) {
+  const hit = SECTION_OF_PATH.find(([re]) => re.test(pathname));
+  return hit ? hit[1] : 'dashboard';
 }
 
 function initials(name) {
@@ -119,8 +124,36 @@ function initials(name) {
 export default function Shell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const groups = groupsForRole(user?.role);
+  const { pathname } = useLocation();
   const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);           // mobile sidebar
+  const [manual, setManual] = useState({});          // prototype's sidebarManualToggle
+  const [unread, setUnread] = useState(0);
+
+  const groups = useMemo(() => groupsForRole(user?.role), [user?.role]);
+  const section = sectionOf(pathname);
+
+  useEffect(() => {
+    api.get('/admin/notifications')
+      .then((res) => setUnread(res.data.filter((n) => !n.read).length))
+      .catch(() => setUnread(0));
+  }, [pathname]);
+
+  // isGroupOpen (prototype line 2067): the current section's group is open
+  // unless the user has toggled it by hand.
+  const isGroupOpen = (s) => (s in manual ? manual[s] : section === s);
+
+  function toggleGroup(s, firstPath) {
+    if (section === s) {
+      setManual({ ...manual, [s]: !isGroupOpen(s) });
+    } else {
+      setManual({});
+      closeSidebar();
+      navigate(firstPath);
+    }
+  }
+  function navTo(path) { closeSidebar(); navigate(path); }
+  function closeSidebar() { setOpen(false); }
 
   function onSearch(e) {
     e.preventDefault();
@@ -128,52 +161,105 @@ export default function Shell() {
     navigate(`/ats/search?q=${encodeURIComponent(q)}`);
   }
 
+  // Breadcrumb: section, then the nav item whose path this page sits under.
+  const allItems = groups.flatMap(([, , items]) => items);
+  const current = allItems
+    .filter(([to]) => pathname === to || pathname.startsWith(to + '/'))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="mark">TL</div>
+    <div className="app-shell">
+      <aside className={'sidebar' + (open ? ' open' : '')} id="sidebar">
+        <div className="sidebar-brand">
           <div>
             <div className="b1">TeamLink Consultants</div>
             <div className="b2">TeamLink.Enterprise</div>
           </div>
+          <button className="sidebar-close" onClick={closeSidebar} aria-label="Close menu">✕</button>
         </div>
-        <nav>
-          <NavLink to="/" end className={({ isActive }) => 'nav-item top-item' + (isActive ? ' active' : '')}>
-            <span className="nav-ico">🏠</span>Dashboard
-          </NavLink>
-          {groups.map((g) => (
-            <div className="nav-group" key={g.label}>
-              <div className="nav-group-label">{g.label}</div>
-              {g.items.map((item) => (
-                <NavLink key={item.to} to={item.to} className={({ isActive }) => 'nav-item' + (isActive ? ' active' : '')}>
-                  <span className="nav-ico">{item.icon}</span>{item.label}
-                </NavLink>
-              ))}
+        <nav className="sidebar-nav">
+          <div
+            className={'sb-item' + (section === 'dashboard' ? ' top-active' : '')}
+            onClick={() => navTo('/')}
+          >
+            Dashboard
+          </div>
+          {groups.map(([s, label, items]) => (
+            <div className={'sb-group' + (isGroupOpen(s) ? ' open' : '')} key={s}>
+              <div className="sb-group-head" onClick={() => toggleGroup(s, items[0][0])}>
+                <span>{label}</span><span className="chev">▸</span>
+              </div>
+              <div className="sb-sub">
+                {items.map(([to, l]) => (
+                  <div
+                    key={to}
+                    className={'sb-sub-item' + (current && current[0] === to ? ' active' : '')}
+                    onClick={() => navTo(to)}
+                  >
+                    {l}
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
-          <div className="nav-group">
-            <a className="nav-item" href="/careers" target="_blank" rel="noreferrer">
-              <span className="nav-ico">🚀</span>Job Portal (public) ↗
-            </a>
+          <div className="sb-group">
+            <a className="sb-item" href="/careers" target="_blank" rel="noreferrer">Job Portal (public) ↗</a>
           </div>
         </nav>
       </aside>
-      <div className="main">
-        <header className="topbar">
-          <div className="topbar-title">TeamLink.Enterprise</div>
+      <div className={'sidebar-overlay' + (open ? ' show' : '')} onClick={closeSidebar} />
+
+      <div className="content-col">
+        <div className="topbar">
+          <button className="hamburger" onClick={() => setOpen(true)} title="Menu">☰</button>
+          <div className="topbar-title">{SECTION_LABEL[section] || 'Dashboard'}</div>
           <form className="gsearch" onSubmit={onSearch}>
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search candidates, clients, requirements…" />
+            <input
+              type="text"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search candidates, clients, requirements…"
+            />
           </form>
           <div className="topbar-right">
-            <span className="rolechip">{user?.role}</span>
+            <span className="rolechip">{atsRoleLabel(user?.role)}</span>
+            <span className="rolechip" style={{ cursor: 'pointer' }} onClick={() => navTo('/admin/notifications')}>🔔 {unread}</span>
             <div className="avatar">{initials(user?.name)}</div>
-            <button className="btn btn-ghost" onClick={logout}>Sign Out</button>
+            <button className="btn btn-ghost btn-sm" onClick={logout}>Sign Out</button>
           </div>
-        </header>
-        <main className="content">
+        </div>
+
+        <div className="breadcrumb">
+          {section === 'dashboard' ? (
+            <span className="bc-current">Dashboard</span>
+          ) : (
+            <>
+              <span className="bc-current">{SECTION_LABEL[section]}</span>
+              {current && (
+                <>
+                  <span className="bc-sep">/</span>
+                  {pathname === current[0]
+                    ? <span className="bc-current">{current[1]}</span>
+                    : <Link className="bc-link" to={current[0]}>{current[1]}</Link>}
+                </>
+              )}
+              {current && pathname !== current[0] && (
+                <>
+                  <span className="bc-sep">/</span>
+                  <span className="bc-current">{decodeURIComponent(pathname.slice(current[0].length + 1))}</span>
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        <main>
           <Outlet />
         </main>
+
+        <footer>
+          TeamLink.Enterprise — HRMS + ATS + Accounts in one login · connected to the TeamLink Job Portal
+        </footer>
       </div>
     </div>
   );

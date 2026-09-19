@@ -13,6 +13,7 @@ import CandidateDetail from './pages/CandidateDetail.jsx';
 import Team from './pages/ats/Team.jsx';
 import InterviewCalendar from './pages/ats/InterviewCalendar.jsx';
 import Search from './pages/ats/Search.jsx';
+import AccountsDashboard from './pages/AccountsDashboard.jsx';
 
 import Employees from './pages/Employees.jsx';
 import EmployeeDetail from './pages/EmployeeDetail.jsx';
@@ -23,6 +24,7 @@ import HrmsDashboard from './pages/hrms/HrmsDashboard.jsx';
 import PerformanceDevelopment from './pages/hrms/PerformanceDevelopment.jsx';
 import EmployeeServices from './pages/hrms/EmployeeServices.jsx';
 import MyProfile from './pages/hrms/MyProfile.jsx';
+import OrgStructure from './pages/hrms/OrgStructure.jsx';
 
 import Invoices from './pages/Invoices.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
@@ -93,12 +95,17 @@ export default function App() {
         <Route path="ats/team" element={<Team />} />
         <Route path="ats/calendar" element={<InterviewCalendar />} />
         <Route path="ats/search" element={<Search />} />
+        {/* The prototype's ATS sidebar opens on its own ATS dashboard screen,
+            which is not built here yet — the entry lands on the main dashboard,
+            which already carries the prototype's six ATS tiles. */}
+        <Route path="ats/dashboard" element={<Dashboard />} />
 
         {/* Accounts */}
         <Route path="invoices" element={<Invoices />} />
         <Route path="invoices/:id" element={<InvoiceDetail />} />
         <Route path="bank" element={<Bank />} />
         <Route path="office" element={<Office />} />
+        <Route path="accounts/dashboard" element={<AccountsDashboard />} />
 
         {/* Reports */}
         <Route path="reports/ats" element={<AtsReports />} />
@@ -111,6 +118,9 @@ export default function App() {
         <Route path="admin/users" element={<Users />} />
         <Route path="admin/roles" element={<RoleCatalog />} />
         <Route path="admin/integrations" element={<Integrations />} />
+        {/* The prototype files Organization Structure under Administration; it
+            also stays a tab inside Performance & Development. */}
+        <Route path="admin/org-structure" element={<OrgStructure />} />
         <Route path="admin/notifications" element={<Notifications />} />
         <Route path="admin/audit" element={<AuditLogs />} />
         <Route path="admin/profile" element={<Profile />} />
