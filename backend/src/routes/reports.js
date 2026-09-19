@@ -1,6 +1,9 @@
 const express = require('express');
 const prisma = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const {
+  ROUND, invoiceTotal, invoiceOutstanding, deriveInvoiceStatus, txnState,
+} = require('../utils/accounts');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -28,13 +31,72 @@ router.get('/job-portal', async (req, res) => {
 });
 
 router.get('/accounts', async (req, res) => {
-  const invoices = await prisma.invoice.findMany();
-  const byStatus = ['Pending', 'Paid', 'Overdue'].map((status) => ({
-    status,
-    count: invoices.filter((i) => i.status === status).length,
-    amount: invoices.filter((i) => i.status === status).reduce((sum, i) => sum + i.amount + i.gst, 0),
+  const [invoices, expenses, transactions] = await Promise.all([
+    prisma.invoice.findMany({ include: { client: true } }),
+    prisma.officeExpense.findMany(),
+    prisma.bankTransaction.findMany(),
+  ]);
+  const rows = invoices.map((i) => ({
+    ...i,
+    derived: deriveInvoiceStatus(i),
+    total: invoiceTotal(i),
+    outstanding: invoiceOutstanding(i),
   }));
-  res.json(byStatus);
+
+  // Totals use amount + GST - TDS, so they match what the client actually pays.
+  const byStatus = ['Pending', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'].map((status) => {
+    const list = rows.filter((i) => i.derived === status);
+    return {
+      status,
+      count: list.length,
+      amount: ROUND(list.reduce((sum, i) => sum + i.total, 0)),
+      outstanding: ROUND(list.reduce((sum, i) => sum + i.outstanding, 0)),
+    };
+  });
+
+  // Receivables ageing on the open invoices, by days past the due date.
+  const today = new Date();
+  const days = (d) => Math.floor((today - new Date(d)) / 86400000);
+  const open = rows.filter((i) => i.derived !== 'Paid' && i.derived !== 'Cancelled');
+  const buckets = [
+    { bucket: 'Not yet due', test: (i) => !i.dueDate || days(i.dueDate) < 0 },
+    { bucket: '0–30 days', test: (i) => i.dueDate && days(i.dueDate) >= 0 && days(i.dueDate) <= 30 },
+    { bucket: '31–60 days', test: (i) => i.dueDate && days(i.dueDate) > 30 && days(i.dueDate) <= 60 },
+    { bucket: '60+ days', test: (i) => i.dueDate && days(i.dueDate) > 60 },
+  ].map(({ bucket, test }) => {
+    const list = open.filter(test);
+    return { bucket, count: list.length, outstanding: ROUND(list.reduce((s, i) => s + i.outstanding, 0)) };
+  });
+
+  const byClientMap = new Map();
+  open.forEach((i) => {
+    const k = i.client?.name || '—';
+    const cur = byClientMap.get(k) || { client: k, count: 0, outstanding: 0 };
+    cur.count += 1;
+    cur.outstanding = ROUND(cur.outstanding + i.outstanding);
+    byClientMap.set(k, cur);
+  });
+
+  const gstCharged = ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.gst || 0), 0));
+  const gstPaid = ROUND(expenses.reduce((s, e) => s + Number(e.gstAmount || 0), 0));
+  const incomeNet = ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.amount || 0), 0));
+  const spendNet = ROUND(expenses.reduce((s, e) => s + (Number(e.monthlyAmount || 0) - Number(e.gstAmount || 0)), 0));
+
+  res.json({
+    byStatus,
+    ageing: buckets,
+    byClient: [...byClientMap.values()].sort((a, b) => b.outstanding - a.outstanding),
+    gstPosition: { charged: gstCharged, paid: gstPaid, payable: ROUND(gstCharged - gstPaid) },
+    tdsDeducted: ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.tds || 0), 0)),
+    profitAndLoss: { incomeNet, spendNet, profit: ROUND(incomeNet - spendNet) },
+    reconciliation: {
+      total: transactions.length,
+      unmatched: transactions.filter((t) => txnState(t) === 'Unmatched').length,
+      matched: transactions.filter((t) => txnState(t) === 'Matched').length,
+      reconciled: transactions.filter((t) => txnState(t) === 'Reconciled').length,
+      ignored: transactions.filter((t) => txnState(t) === 'Ignored').length,
+    },
+  });
 });
 
 module.exports = router;

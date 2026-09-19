@@ -396,11 +396,37 @@ model Invoice {
   amount          Float
   gst             Float     @default(0)
   tds             Float     @default(0)
-  status          String    @default("Pending") // Pending | Paid | Overdue
+  status          String    @default("Pending") // Pending | Partially Paid | Paid | Overdue | Cancelled
   invoiceDate     String
   dueDate         String?
   paymentTerms    String?   @default("Net 30")
   createdAt       DateTime  @default(now())
+
+  // Accounts depth — human-facing number, money actually received, and the
+  // bank line that finally closed the invoice off.
+  invoiceNumber   String?   @unique
+  receivedAmount  Float     @default(0)
+  paidDate        String?
+  bankTxnId       String?
+  notes           String?
+
+  payments        InvoicePayment[]
+}
+
+// A receipt against an invoice. An invoice can be settled by several of these,
+// which is what makes "Partially Paid" a real state rather than a label.
+model InvoicePayment {
+  id            String   @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  date          String
+  amount        Float
+  method        String   @default("Bank Transfer")
+  reference     String?
+  notes         String?
+  bankTxnId     String?
+  recordedBy    String?
+  createdAt     DateTime @default(now())
 }
 
 model BankTransaction {
@@ -412,6 +438,17 @@ model BankTransaction {
   matched          Boolean  @default(false)
   matchedInvoiceId String?
   createdAt        DateTime @default(now())
+
+  // Reconciliation state machine:
+  // Unmatched -> Matched -> Reconciled, with Ignored as a parked side state.
+  reconStatus      String   @default("Unmatched")
+  reference        String?
+  balance          Float?
+  matchedBy        String?
+  matchedDate      String?
+  clientName       String?
+  importBatch      String?
+  ignoredReason    String?
 }
 
 model OfficeExpense {
@@ -420,6 +457,15 @@ model OfficeExpense {
   location      String?
   monthlyAmount Float
   createdAt     DateTime @default(now())
+
+  // Office & Business depth — a dated, vendor-attributed bill with its own GST,
+  // which is what the month summary, the P&L and the GST position are built on.
+  vendor        String?
+  expenseDate   String?
+  gstAmount     Float    @default(0)
+  paidStatus    String   @default("Paid") // Paid | Unpaid
+  recurring     Boolean  @default(true)
+  notes         String?
 }
 
 // =============================================================================

@@ -176,19 +176,34 @@ async function main() {
   await prisma.payslip.create({ data: { employeeId: empDivya.id, month: '2026-08', basic: 75000, hra: 30000, allowances: 45000, deductions: 2000, netPay: 148000, bonus: 6250, specialAllowance: 38750, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 3608, lopDays: 0 } });
 
   // Accounts
+  // An invoice is worth amount + GST - TDS: the client deducts TDS at source,
+  // so 150000 + 27000 - 15000 = 162000 is what actually lands in the bank.
   const invoice1 = await prisma.invoice.create({
-    data: { clientId: orbit.id, candidateId: cand1.id, requirementId: req1.id, amount: 150000, gst: 27000, tds: 15000, status: 'Pending', invoiceDate: '2026-09-05', dueDate: '2026-10-05', paymentTerms: 'Net 30' },
+    data: { clientId: orbit.id, candidateId: cand1.id, requirementId: req1.id, invoiceNumber: 'INV-2026-0001', amount: 150000, gst: 27000, tds: 15000, status: 'Pending', invoiceDate: '2026-09-05', dueDate: '2026-10-05', paymentTerms: 'Net 30' },
   });
   await prisma.invoice.create({
-    data: { clientId: medivant.id, amount: 80000, gst: 14400, tds: 8000, status: 'Overdue', invoiceDate: '2026-08-01', dueDate: '2026-08-31', paymentTerms: 'Net 30' },
+    data: { clientId: medivant.id, invoiceNumber: 'INV-2026-0002', amount: 80000, gst: 14400, tds: 8000, status: 'Overdue', invoiceDate: '2026-08-01', dueDate: '2026-08-31', paymentTerms: 'Net 30' },
+  });
+  // Part-settled, so "Partially Paid" has something to show.
+  const invoice3 = await prisma.invoice.create({
+    data: { clientId: orbit.id, invoiceNumber: 'INV-2026-0003', amount: 200000, gst: 36000, tds: 20000, status: 'Partially Paid', invoiceDate: '2026-07-10', dueDate: '2026-08-09', paymentTerms: 'Net 30', receivedAmount: 100000 },
+  });
+  await prisma.invoicePayment.create({
+    data: { invoiceId: invoice3.id, date: '2026-08-14', amount: 100000, method: 'Bank Transfer', reference: 'UTR8841207', notes: 'Part payment on account', recordedBy: 'Lakshmi Narayan' },
   });
 
-  await prisma.bankTransaction.create({ data: { date: '2026-09-08', description: 'NEFT - Orbit Software Solutions', type: 'Credit', amount: 177000, matched: false } });
-  await prisma.bankTransaction.create({ data: { date: '2026-09-12', description: 'Office rent - Hyderabad', type: 'Debit', amount: 85000, matched: true } });
+  // Bank statement: one credit that clears invoice1 exactly, one that does not
+  // match anything, and office debits.
+  await prisma.bankTransaction.create({ data: { date: '2026-09-08', description: 'NEFT CR-ORBIT SOFTWARE SOLUTIONS-INV0001', reference: 'UTR9930114', type: 'Credit', amount: 162000, matched: false, reconStatus: 'Unmatched', balance: 1042000 } });
+  await prisma.bankTransaction.create({ data: { date: '2026-09-10', description: 'IMPS CR-MEDIVANT HEALTHCARE-PART', reference: 'UTR9930255', type: 'Credit', amount: 43000, matched: false, reconStatus: 'Unmatched', balance: 1085000 } });
+  await prisma.bankTransaction.create({ data: { date: '2026-09-12', description: 'Office rent - Hyderabad', reference: 'NEFT7710', type: 'Debit', amount: 85000, matched: false, reconStatus: 'Unmatched', balance: 1000000 } });
+  await prisma.bankTransaction.create({ data: { date: '2026-09-15', description: 'BANK CHARGES QTR', type: 'Debit', amount: 590, matched: false, reconStatus: 'Ignored', ignoredReason: 'Bank charges — not a client transaction', balance: 999410 } });
 
-  await prisma.officeExpense.create({ data: { category: 'Office Rent', location: 'Hyderabad', monthlyAmount: 85000 } });
-  await prisma.officeExpense.create({ data: { category: 'Office Rent', location: 'Bengaluru', monthlyAmount: 110000 } });
-  await prisma.officeExpense.create({ data: { category: 'Software Subscriptions', location: 'All', monthlyAmount: 22000 } });
+  await prisma.officeExpense.create({ data: { category: 'Office Rent', location: 'Hyderabad', monthlyAmount: 85000, vendor: 'Sai Estates', expenseDate: '2026-09-01', gstAmount: 12966, paidStatus: 'Paid' } });
+  await prisma.officeExpense.create({ data: { category: 'Office Rent', location: 'Bengaluru', monthlyAmount: 110000, vendor: 'Prestige Facilities', expenseDate: '2026-09-01', gstAmount: 16780, paidStatus: 'Paid' } });
+  await prisma.officeExpense.create({ data: { category: 'Software Subscriptions', location: 'All', monthlyAmount: 22000, vendor: 'Naukri / LinkedIn', expenseDate: '2026-09-03', gstAmount: 3356, paidStatus: 'Paid' } });
+  await prisma.officeExpense.create({ data: { category: 'Internet & Telecom', location: 'Hyderabad', monthlyAmount: 9500, vendor: 'ACT Fibernet', expenseDate: '2026-09-05', gstAmount: 1449, paidStatus: 'Unpaid' } });
+  await prisma.officeExpense.create({ data: { category: 'Office Rent', location: 'Hyderabad', monthlyAmount: 85000, vendor: 'Sai Estates', expenseDate: '2026-08-01', gstAmount: 12966, paidStatus: 'Paid' } });
 
   // HRMS long tail
   await prisma.performanceReview.create({ data: { employeeId: empDivya.id, period: '2026-H1', score: 82, band: 'High', recommendation: 'Recommended', notes: 'Consistently exceeds targets.' } });

@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
+import { useAuth } from '../context/AuthContext.jsx';
+import AccountsDashboard from './AccountsDashboard.jsx';
+
+const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
@@ -30,6 +35,7 @@ export default function Dashboard() {
         <Stat n={stats.invoicesPending} l="Pending invoices" />
         <Stat n={stats.invoicesOverdue} l="Overdue invoices" />
       </div>
+      {ACCOUNTS_ROLES.includes(user?.role) && <AccountsDashboard />}
       <div className="card section">
         <h3>Recent activity</h3>
         <div className="timeline">
