@@ -61,25 +61,25 @@ async function main() {
   });
 
   const admin = await prisma.user.create({
-    data: { name: 'Vasu (Admin)', email: 'admin@teamlink.test', passwordHash: password, role: 'SUPER_ADMIN' },
+    data: { name: 'Vasu (Admin)', email: 'admin@teamlink.test', passwordHash: password, role: 'SUPER_ADMIN', username: 'admin@teamlink.test', branch: 'Hyderabad', team: 'Leadership' },
   });
   const recruiter = await prisma.user.create({
-    data: { name: 'Kiran Kumar', email: 'recruiter@teamlink.test', passwordHash: password, role: 'RECRUITER', atsDepartment: 'IT' },
+    data: { name: 'Kiran Kumar', email: 'recruiter@teamlink.test', passwordHash: password, role: 'RECRUITER', atsDepartment: 'IT', username: 'kiran.kumar', branch: 'Hyderabad', team: 'Section A' },
   });
   const bde = await prisma.user.create({
-    data: { name: 'Sanjay Mehta', email: 'bde@teamlink.test', passwordHash: password, role: 'BDE', atsDepartment: 'IT' },
+    data: { name: 'Sanjay Mehta', email: 'bde@teamlink.test', passwordHash: password, role: 'BDE', atsDepartment: 'IT', username: 'sanjay.mehta', branch: 'Bengaluru', team: 'Business Development' },
   });
   const tl = await prisma.user.create({
-    data: { name: 'Divya Rao', email: 'tl@teamlink.test', passwordHash: password, role: 'TL', atsDepartment: 'IT' },
+    data: { name: 'Divya Rao', email: 'tl@teamlink.test', passwordHash: password, role: 'TL', atsDepartment: 'IT', username: 'divya.rao', branch: 'Hyderabad', team: 'Section A' },
   });
   await prisma.user.create({
-    data: { name: 'Orbit Software Solutions (Client)', email: 'client@teamlink.test', passwordHash: password, role: 'CLIENT', clientId: orbit.id },
+    data: { name: 'Orbit Software Solutions (Client)', email: 'client@teamlink.test', passwordHash: password, role: 'CLIENT', clientId: orbit.id, username: 'orbit.client', branch: 'Hyderabad' },
   });
   const accountant = await prisma.user.create({
-    data: { name: 'Lakshmi Narayan', email: 'accountant@teamlink.test', passwordHash: password, role: 'ACCOUNTANT' },
+    data: { name: 'Lakshmi Narayan', email: 'accountant@teamlink.test', passwordHash: password, role: 'ACCOUNTANT', username: 'lakshmi.narayan', branch: 'Hyderabad', team: 'Accounts' },
   });
   const employeeUser = await prisma.user.create({
-    data: { name: 'Meera Iyer', email: 'employee@teamlink.test', passwordHash: password, role: 'EMPLOYEE' },
+    data: { name: 'Meera Iyer', email: 'employee@teamlink.test', passwordHash: password, role: 'EMPLOYEE', username: 'meera.iyer', branch: 'Hyderabad', team: 'HR' },
   });
 
   // Requirement titles, skills, experience bands, locations, work modes and
@@ -229,7 +229,127 @@ async function main() {
       candidateId: cand3.id, requirementId: req2.id, stage: 'AI_INTERVIEW_SCHEDULED',
       matchScore: 88, resumeScore: 79, source: 'TeamLink Website', firstSource: 'TeamLink Website',
       applicationMethod: 'Manual', aiInterviewStatus: 'Scheduled',
+      // Deliberately in the past, so the AI Interview tab demonstrates the
+      // Expired row — which never rejects the candidate, only offers Extend /
+      // Resend / Manual Review.
+      aiInterviewDeadline: new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10),
     },
+  });
+
+  // ---- Interview Calendar ---------------------------------------------------
+  // One interview at each interesting point of the chain, so the calendar shows
+  // the real status vocabulary rather than an empty table. Each gets its own
+  // candidate, so Sneha Kulkarni stays unassigned for the matching-candidates demo.
+  const inDays = (n, hour) => { const d = new Date(); d.setDate(d.getDate() + n); d.setHours(hour, 0, 0, 0); return d; };
+
+  const candIv1 = await prisma.candidate.create({
+    data: {
+      name: 'Vikram Nair', email: 'vikram@example.com', phone: '9000000005',
+      source: 'Naukri', firstSource: 'Referral',
+      skills: 'Java, Spring Boot, Microservices, SQL', goodToHaveSkills: 'AWS, Kafka',
+      experienceYears: 6, relevantExperienceYears: 6,
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      currentCompany: 'Helios Systems', currentDesignation: 'Senior Engineer',
+      currentSalary: '15L', expectedSalary: '19L',
+      noticePeriod: '30 Days', availability: 'Available after notice period',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Hybrid',
+      education: 'B.Tech', specialization: 'Computer Science', institute: 'NIT Warangal', passingYear: '2018',
+      resumeName: 'Vikram_Nair.pdf', resumeScore: 86, profileStatus: 'Active',
+    },
+  });
+  const candIv2 = await prisma.candidate.create({
+    data: {
+      name: 'Ananya Das', email: 'ananya@example.com', phone: '9000000006',
+      source: 'LinkedIn', firstSource: 'LinkedIn',
+      skills: 'Clinical Trials, GCP, Regulatory Affairs',
+      experienceYears: 5, relevantExperienceYears: 4,
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      currentCompany: 'Medira Life Sciences', currentDesignation: 'Senior CRA',
+      currentSalary: '11L', expectedSalary: '14L',
+      noticePeriod: '30 Days', availability: 'Available after notice period',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Work From Office',
+      education: 'M.Sc', specialization: 'Pharmacology', institute: 'Osmania University', passingYear: '2019',
+      resumeName: 'Ananya_Das.pdf', resumeScore: 88, profileStatus: 'Active',
+    },
+  });
+  const candIv3 = await prisma.candidate.create({
+    data: {
+      name: 'Rohit Desai', email: 'rohit@example.com', phone: '9000000007',
+      source: 'Referral', firstSource: 'Referral',
+      skills: 'Java, Spring Boot, SQL', goodToHaveSkills: 'Docker',
+      experienceYears: 5, relevantExperienceYears: 4,
+      location: 'Bengaluru', preferredLocation: 'Hyderabad',
+      currentCompany: 'Cobalt Software', currentDesignation: 'Software Engineer',
+      currentSalary: '13L', expectedSalary: '17L',
+      noticePeriod: '60 Days', availability: 'Available after notice period',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Hybrid',
+      education: 'B.E', specialization: 'Computer Science', institute: 'RV College', passingYear: '2019',
+      resumeName: 'Rohit_Desai.pdf', resumeScore: 81, profileStatus: 'Active',
+    },
+  });
+
+  const ivConfirmed = await prisma.application.create({
+    data: {
+      candidateId: candIv1.id, requirementId: req1.id, stage: 'INTERVIEW_SCHEDULED',
+      matchScore: 92, resumeScore: 86, source: 'Naukri', firstSource: 'Referral',
+      applicationMethod: 'Manual', aiInterviewStatus: 'Completed', aiInterviewScore: 88,
+      aiInterviewFeedback: 'Strong on Java and Spring Boot; brief on system design.',
+      interviewStatus: 'CONFIRMED', interviewAt: inDays(3, 11),
+      interviewCode: 'INT-000101', interviewRound: 1, interviewType: 'Client Interview',
+      interviewer: 'Arun Prasad (Orbit)', interviewMode: 'Online',
+      interviewMeetingLink: 'https://meet.example.com/orbit-java-r1',
+      interviewCreatedBy: 'Kiran Kumar',
+    },
+  });
+  await prisma.interviewEvent.createMany({
+    data: [
+      { applicationId: ivConfirmed.id, status: 'SCHEDULED', by: 'Kiran Kumar' },
+      { applicationId: ivConfirmed.id, status: 'CONFIRMED', by: 'Kiran Kumar' },
+    ],
+  });
+
+  const ivPending = await prisma.application.create({
+    data: {
+      candidateId: candIv2.id, requirementId: req2.id, stage: 'INTERVIEW_COMPLETED',
+      matchScore: 91, resumeScore: 88, source: 'LinkedIn', firstSource: 'LinkedIn',
+      applicationMethod: 'Manual', aiInterviewStatus: 'Completed', aiInterviewScore: 82,
+      interviewStatus: 'PENDING_FEEDBACK', interviewAt: inDays(-1, 15),
+      interviewCode: 'INT-000102', interviewRound: 2, interviewType: 'Internal Panel',
+      interviewer: 'Divya Rao', interviewMode: 'In Person', interviewLocation: 'Hyderabad — Floor 4',
+      interviewCreatedBy: 'Divya Rao',
+      interviewStartedAt: inDays(-1, 15), interviewCompletedAt: inDays(-1, 16),
+    },
+  });
+  await prisma.interviewEvent.createMany({
+    data: [
+      { applicationId: ivPending.id, status: 'SCHEDULED', by: 'Divya Rao' },
+      { applicationId: ivPending.id, status: 'CONFIRMED', by: 'Divya Rao' },
+      { applicationId: ivPending.id, status: 'STARTED', by: 'Divya Rao' },
+      { applicationId: ivPending.id, status: 'COMPLETED', by: 'Divya Rao' },
+      { applicationId: ivPending.id, status: 'PENDING_FEEDBACK', by: 'System' },
+    ],
+  });
+
+  const ivRescheduled = await prisma.application.create({
+    data: {
+      candidateId: candIv3.id, requirementId: req1.id, stage: 'INTERVIEW_SCHEDULED',
+      matchScore: 84, resumeScore: 81, source: 'Referral', firstSource: 'Referral',
+      applicationMethod: 'Manual', aiInterviewStatus: 'Completed', aiInterviewScore: 70,
+      interviewStatus: 'RESCHEDULED', interviewAt: inDays(6, 10),
+      interviewCode: 'INT-000103', interviewRound: 1, interviewType: 'Client Interview',
+      interviewer: 'Arun Prasad (Orbit)', interviewMode: 'Online',
+      interviewMeetingLink: 'https://meet.example.com/orbit-java-r1b',
+      interviewCreatedBy: 'Kiran Kumar', interviewRescheduleCount: 1,
+    },
+  });
+  await prisma.interviewEvent.createMany({
+    data: [
+      { applicationId: ivRescheduled.id, status: 'SCHEDULED', by: 'Kiran Kumar' },
+      {
+        applicationId: ivRescheduled.id, status: 'RESCHEDULED', by: 'Kiran Kumar',
+        reason: 'Client panel unavailable', fromSlot: inDays(1, 10).toISOString(), toSlot: inDays(6, 10).toISOString(),
+      },
+    ],
   });
 
   // HRMS

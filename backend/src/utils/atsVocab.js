@@ -275,6 +275,51 @@ const DEFAULT_GUARANTEE_PERIOD = '30 Days';
 const DEFAULT_PAYMENT_DUE = '6 days after invoice';
 const DEFAULT_PAYMENT_TERMS = PAYMENT_TERMS[0];
 
+
+// ---------------------------------------------------------------------------
+// Recruitment / client interview lifecycle (prototype INTERVIEW_STATUSES +
+// IV_NEXT, line 9200). Stored as codes; the labels below are the exact strings
+// the prototype shows. Scheduled -> Confirmed -> Started -> Completed ->
+// Pending Feedback, with Cancelled / No Show / Rescheduled tracked separately.
+// ---------------------------------------------------------------------------
+const INTERVIEW_STATUS_CODES = [
+  'SCHEDULED', 'CONFIRMED', 'STARTED', 'COMPLETED', 'PENDING_FEEDBACK',
+  'CANCELLED', 'NO_SHOW', 'RESCHEDULED',
+];
+
+const INTERVIEW_STATUS_LABELS = {
+  SCHEDULED: 'Scheduled',
+  CONFIRMED: 'Confirmed',
+  STARTED: 'Started',
+  COMPLETED: 'Completed',
+  PENDING_FEEDBACK: 'Pending Feedback',
+  CANCELLED: 'Cancelled',
+  NO_SHOW: 'No Show',
+  RESCHEDULED: 'Rescheduled',
+};
+
+// The only forward move allowed from each status — no skipping.
+const INTERVIEW_NEXT = {
+  SCHEDULED: 'CONFIRMED',
+  CONFIRMED: 'STARTED',
+  STARTED: 'COMPLETED',
+  COMPLETED: 'PENDING_FEEDBACK',
+};
+
+// Statuses an interview cannot be advanced out of — it must be rescheduled.
+const INTERVIEW_TERMINAL = ['CANCELLED', 'NO_SHOW'];
+
+const INTERVIEW_TYPES = ['Client Interview', 'Internal Panel'];
+const INTERVIEW_MODES = ['Online', 'In Person', 'Telephonic'];
+const INTERVIEW_RESULTS = ['Recommended', 'Hold', 'Not Selected'];
+
+// AI interview tab. An expired AI interview never rejects the candidate.
+const AI_INTERVIEW_STATUSES = ['Required', 'Scheduled', 'Started', 'Completed', 'Expired', 'Manual Review Requested'];
+
+function interviewStatusLabel(code) {
+  return INTERVIEW_STATUS_LABELS[code] || code || '—';
+}
+
 module.exports = {
   STAGE_CODES,
   EXTRA_STAGE_CODES,
@@ -297,6 +342,15 @@ module.exports = {
   DEPTS,
   LOCS,
   REQUIREMENT_TYPES,
+  INTERVIEW_STATUS_CODES,
+  INTERVIEW_STATUS_LABELS,
+  INTERVIEW_NEXT,
+  INTERVIEW_TERMINAL,
+  INTERVIEW_TYPES,
+  INTERVIEW_MODES,
+  INTERVIEW_RESULTS,
+  AI_INTERVIEW_STATUSES,
+  interviewStatusLabel,
   PRIORITIES,
   REQUIREMENT_STATUSES,
   EDUCATION_LEVELS,

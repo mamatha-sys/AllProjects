@@ -16,6 +16,14 @@ router.post('/login', async (req, res) => {
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
 
+  // A login an admin has disabled on the Users screen is really disabled.
+  if (user.status && user.status !== 'Active') {
+    return res.status(403).json({ error: `This login is ${user.status.toLowerCase()} — ask an administrator to re-enable it` });
+  }
+
+  // Stamps the Users screen's "Last Login" column.
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+
   const token = jwt.sign(
     { id: user.id, role: user.role, name: user.name, atsDepartment: user.atsDepartment, clientId: user.clientId },
     process.env.JWT_SECRET,

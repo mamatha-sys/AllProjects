@@ -101,6 +101,49 @@ export function atsRoleLabel(code) {
   return ATS_ROLE_LABELS[code] || code || '—';
 }
 
+// --- Recruitment / client interview lifecycle ------------------------------
+// The prototype's INTERVIEW_STATUSES + IV_NEXT (line 9200). Mirrors
+// backend/src/utils/atsVocab.js — keep the two in step.
+export const INTERVIEW_STATUS_CODES = [
+  'SCHEDULED', 'CONFIRMED', 'STARTED', 'COMPLETED', 'PENDING_FEEDBACK',
+  'CANCELLED', 'NO_SHOW', 'RESCHEDULED',
+];
+
+export const INTERVIEW_STATUS_LABELS = {
+  SCHEDULED: 'Scheduled',
+  CONFIRMED: 'Confirmed',
+  STARTED: 'Started',
+  COMPLETED: 'Completed',
+  PENDING_FEEDBACK: 'Pending Feedback',
+  CANCELLED: 'Cancelled',
+  NO_SHOW: 'No Show',
+  RESCHEDULED: 'Rescheduled',
+};
+
+export function interviewStatusLabel(code) {
+  return INTERVIEW_STATUS_LABELS[code] || code || '—';
+}
+
+// Only one forward move is allowed from each status — no skipping.
+export const INTERVIEW_NEXT = {
+  SCHEDULED: 'CONFIRMED',
+  CONFIRMED: 'STARTED',
+  STARTED: 'COMPLETED',
+  COMPLETED: 'PENDING_FEEDBACK',
+};
+
+export const INTERVIEW_TYPES = ['Client Interview', 'Internal Panel'];
+export const INTERVIEW_MODES = ['Online', 'In Person', 'Telephonic'];
+export const INTERVIEW_RESULTS = ['Recommended', 'Hold', 'Not Selected'];
+
+// Reuses the existing badge palette rather than the prototype's inline colours.
+export function interviewStatusClass(code) {
+  if (code === 'COMPLETED') return 'priority-low';
+  if (['CANCELLED', 'NO_SHOW'].includes(code)) return 'priority-high';
+  if (['PENDING_FEEDBACK', 'RESCHEDULED'].includes(code)) return 'priority-medium';
+  return '';
+}
+
 // --- Option lists used by the Add/Edit forms -------------------------------
 export const DEPTS = ['IT', 'Medical', 'Manufacturing', 'Education', 'BDE', 'HR', 'Accounts', 'R&D'];
 export const LOCS = ['Hyderabad', 'Bengaluru', 'Pune'];

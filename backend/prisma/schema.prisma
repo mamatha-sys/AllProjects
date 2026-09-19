@@ -16,7 +16,10 @@ datasource db {
 //   RECRUITER_REVIEW | RECRUITER_APPROVED | WITH_BDE | BDE_APPROVED | SHARED_WITH_CLIENT |
 //   CLIENT_REVIEW | CLIENT_SHORTLISTED | INTERVIEW_SCHEDULED | INTERVIEW_COMPLETED | SELECTED | OFFER |
 //   OFFER_ACCEPTED | JOINED | HIRED | REJECTED | HOLD
-// InterviewStatus: SCHEDULED | COMPLETED | CANCELLED
+// InterviewStatus: SCHEDULED | CONFIRMED | STARTED | COMPLETED | PENDING_FEEDBACK |
+//   CANCELLED | NO_SHOW | RESCHEDULED
+//   (the prototype's recruitment/client interview chain — see
+//    backend/src/utils/atsVocab.js INTERVIEW_STATUS_LABELS / INTERVIEW_NEXT)
 // AgreementStatus: DRAFT | SENT | CONFIRMED | ACTIVE | CANCELLED | EXPIRED
 //   (the reference prototype's agreement lifecycle — a client requirement can
 //    only be activated or posted once its agreement reaches ACTIVE)
@@ -30,10 +33,25 @@ model User {
   name           String
   email          String   @unique
   passwordHash   String
+  // One login carries ONE product role today. The reference prototype gives each
+  // login three independent product roles (hrmsRole / atsRole / accountsRole) on
+  // the same account. That split touches every guard, route and screen in the
+  // app, so it is deliberately deferred: when it lands, add hrmsRole/atsRole/
+  // accountsRole here alongside `role`, backfill them from `role`, and switch
+  // middleware/auth.js requireRole() to read the product-specific column. Until
+  // then the Users screen derives per-product access from this single value —
+  // see backend/src/utils/roleAccess.js (PRODUCT_ACCESS).
   role           String
   atsDepartment  String?
   clientId       String?
   client         Client?  @relation(fields: [clientId], references: [id])
+
+  // Login administration — the prototype's Users screen (usersView, line 9893).
+  username       String?
+  status         String   @default("Active") // Active | Inactive | Suspended
+  branch         String?
+  team           String?
+  lastLoginAt    DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -230,6 +248,30 @@ model Application {
   interviewStatus   String?
   interviewAt       DateTime?
 
+  // Recruitment / client interview detail — the prototype's `application.interview`
+  // object (recruitmentInterviewTab, line 9330). Kept on Application rather than in
+  // a parallel model so interviewStatus/interviewAt stay the single source of truth.
+  interviewCode        String?  // INT-#### shown in the calendar's first column
+  interviewRound       Int      @default(1)
+  interviewType        String?  // Client Interview | Internal Panel
+  interviewer          String?
+  interviewMode        String?  // Online | In Person | Telephonic
+  interviewLocation    String?
+  interviewMeetingLink String?
+  interviewScore       Int?     // recruitment/client score — never mixed with aiInterviewScore
+  interviewResult      String?  // Recommended | Hold | Not Selected
+  interviewFeedback    String?
+  interviewCreatedBy   String?
+  interviewCancelReason String?
+  interviewRescheduleCount Int  @default(0)
+  interviewStartedAt   DateTime?
+  interviewCompletedAt DateTime?
+  interviewEvents      InterviewEvent[]
+
+  // AI interview detail (the calendar's second tab).
+  aiInterviewDeadline  String?
+  aiInterviewFeedback  String?
+
   // Per-application detail the prototype's pipeline columns read from.
   matchScore        Int?
   resumeScore       Int?
@@ -246,6 +288,21 @@ model Application {
   updatedAt     DateTime          @updatedAt
 
   @@unique([candidateId, requirementId])
+}
+
+// Every status move a recruitment/client interview makes, kept in full — the
+// prototype's `interview.history` + `interview.rescheduleHistory`. Nothing is
+// overwritten silently: a reschedule appends rather than replacing the slot.
+model InterviewEvent {
+  id            String      @id @default(cuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  status        String      // the status this event moved the interview to
+  reason        String?     // cancellation / reschedule / no-show reason
+  fromSlot      String?     // previous date+time, on a reschedule
+  toSlot        String?     // new date+time, on a reschedule
+  by            String?     // who did it
+  createdAt     DateTime    @default(now())
 }
 
 model AuditLog {
@@ -854,4 +911,22 @@ model Notification {
   message   String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+}
+
+// Role Catalog "Edit Access" — one row per (role, module). `moduleEnabled` is
+// the module toggle; `features` is a JSON object mapping each named feature to
+// its seven action flags, e.g.
+//   {"Candidate List":{"view":true,"create":false,...}}
+// The module/feature catalog itself is code, not data — see
+// backend/src/utils/roleAccess.js (ROLE_ACCESS_MODULES / ROLE_FEATURE_ACTIONS),
+// mirroring the prototype's roleAccessFor() matrix.
+model RoleAccess {
+  id            String   @id @default(cuid())
+  role          String
+  moduleId      String
+  moduleEnabled Boolean  @default(false)
+  features      String?  // JSON: { featureName: { view, create, edit, delete, approve, export, assign } }
+  updatedAt     DateTime @updatedAt
+
+  @@unique([role, moduleId])
 }
