@@ -6,6 +6,18 @@ const prisma = new PrismaClient();
 async function main() {
   const password = await bcrypt.hash('password123', 10);
 
+  const departmentNames = ['IT', 'HR', 'R&D', 'QA', 'Manufacturing', 'Medical', 'Educational', 'BDE'];
+  const departmentsByName = {};
+  for (const name of departmentNames) {
+    departmentsByName[name] = await prisma.department.create({ data: { name } });
+  }
+  await prisma.team.createMany({
+    data: [
+      { name: 'Team-A', departmentId: departmentsByName['Educational'].id },
+      { name: 'Team-B', departmentId: departmentsByName['Educational'].id },
+    ],
+  });
+
   const orbit = await prisma.client.create({ data: { name: 'Orbit Software Solutions', industry: 'IT', location: 'Hyderabad' } });
   const medivant = await prisma.client.create({ data: { name: 'Medivant Healthcare', industry: 'Medical', location: 'Bengaluru' } });
 

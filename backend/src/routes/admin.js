@@ -8,6 +8,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
+const SUPER_ADMIN_ONLY = ['SUPER_ADMIN'];
 const ALL_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL', 'RECRUITER', 'BDE', 'CLIENT', 'ACCOUNTANT', 'EMPLOYEE'];
 
 // ---- Users ----
@@ -49,6 +50,57 @@ router.get('/role-catalog', (req, res) => {
     { role: 'ACCOUNTANT', access: 'Accounts + Payroll only' },
     { role: 'EMPLOYEE', access: 'HRMS self-service only' },
   ]);
+});
+
+// ---- Departments & Teams (Super Admin-managed; everyone can read them for dropdowns) ----
+router.get('/departments', async (req, res) => {
+  const departments = await prisma.department.findMany({ include: { teams: { orderBy: { name: 'asc' } } }, orderBy: { name: 'asc' } });
+  res.json(departments);
+});
+
+router.post('/departments', requireRole(...SUPER_ADMIN_ONLY), async (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  try {
+    const department = await prisma.department.create({ data: { name: name.trim() } });
+    await logAudit({ userId: req.user.id, action: 'Department added', entity: 'Department', entityId: department.id, toValue: department.name });
+    res.status(201).json(department);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'That department already exists' });
+    throw err;
+  }
+});
+
+router.delete('/departments/:id', requireRole(...SUPER_ADMIN_ONLY), async (req, res) => {
+  const department = await prisma.department.findUnique({ where: { id: req.params.id } });
+  if (!department) return res.status(404).json({ error: 'Department not found' });
+  await prisma.team.deleteMany({ where: { departmentId: req.params.id } });
+  await prisma.department.delete({ where: { id: req.params.id } });
+  await logAudit({ userId: req.user.id, action: 'Department removed', entity: 'Department', entityId: req.params.id, fromValue: department.name });
+  res.json({ ok: true });
+});
+
+router.post('/departments/:id/teams', requireRole(...SUPER_ADMIN_ONLY), async (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'name is required' });
+  const department = await prisma.department.findUnique({ where: { id: req.params.id } });
+  if (!department) return res.status(404).json({ error: 'Department not found' });
+  try {
+    const team = await prisma.team.create({ data: { name: name.trim(), departmentId: req.params.id } });
+    await logAudit({ userId: req.user.id, action: 'Team added', entity: 'Team', entityId: team.id, toValue: `${department.name} / ${team.name}` });
+    res.status(201).json(team);
+  } catch (err) {
+    if (err.code === 'P2002') return res.status(409).json({ error: 'That team already exists in this department' });
+    throw err;
+  }
+});
+
+router.delete('/teams/:id', requireRole(...SUPER_ADMIN_ONLY), async (req, res) => {
+  const team = await prisma.team.findUnique({ where: { id: req.params.id } });
+  if (!team) return res.status(404).json({ error: 'Team not found' });
+  await prisma.team.delete({ where: { id: req.params.id } });
+  await logAudit({ userId: req.user.id, action: 'Team removed', entity: 'Team', entityId: req.params.id, fromValue: team.name });
+  res.json({ ok: true });
 });
 
 // ---- Company setup ----

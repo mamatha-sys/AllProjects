@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
 const EDIT_FIELDS = [
-  'name', 'email', 'phone', 'department', 'designation', 'location', 'employmentStatus', 'employeeType',
+  'name', 'email', 'phone', 'department', 'team', 'designation', 'location', 'employmentStatus', 'employeeType',
   'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'addressType',
   'addressLine1', 'addressLine2', 'city', 'district', 'state', 'country', 'postalCode', 'bloodGroup',
   'branch', 'shift', 'employmentExperience', 'educationDetails', 'skills',
@@ -22,11 +22,15 @@ export default function EmployeeDetail() {
   const [employee, setEmployee] = useState(null);
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({});
+  const [depts, setDepts] = useState([]);
 
   function load() {
     api.get(`/employees/${id}`).then((res) => setEmployee(res.data));
+    api.get('/admin/departments').then((res) => setDepts(res.data)).catch(() => setDepts([]));
   }
   useEffect(load, [id]);
+
+  const formTeams = depts.find((d) => d.name === form.department)?.teams || [];
 
   function startEdit() {
     const f = {};
@@ -176,7 +180,19 @@ export default function EmployeeDetail() {
 
           <h3 style={{ marginTop: 14 }}>Employment Details</h3>
           <div className="grid-2">
-            <label className="field"><span>Department</span><input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
+            <label className="field">
+              <span>Department (use Transfer to change)</span>
+              <input value={form.department} disabled />
+            </label>
+            {formTeams.length > 0 && (
+              <label className="field">
+                <span>Team</span>
+                <select value={form.team} onChange={(e) => setForm({ ...form, team: e.target.value })}>
+                  <option value="">No team</option>
+                  {formTeams.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+              </label>
+            )}
             <label className="field">
               <span>Branch</span>
               <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
@@ -234,6 +250,7 @@ export default function EmployeeDetail() {
             <div className="kv"><span className="k">Email</span><span>{employee.email || '—'}</span></div>
             <div className="kv"><span className="k">Phone</span><span>{employee.phone || '—'}</span></div>
             <div className="kv"><span className="k">Department</span><span>{employee.department || '—'}</span></div>
+            <div className="kv"><span className="k">Team</span><span>{employee.team || '—'}</span></div>
             <div className="kv"><span className="k">Branch</span><span>{employee.branch || '—'}</span></div>
             <div className="kv"><span className="k">Designation</span><span>{employee.designation || '—'}</span></div>
             <div className="kv"><span className="k">Shift</span><span>{employee.shift || '—'}</span></div>

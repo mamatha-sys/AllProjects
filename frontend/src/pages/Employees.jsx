@@ -7,7 +7,8 @@ export default function Employees() {
   const { user } = useAuth();
   const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
   const [employees, setEmployees] = useState([]);
-  const [form, setForm] = useState({ employeeCode: '', name: '', email: '', department: '', designation: '', role: '', password: '' });
+  const [depts, setDepts] = useState([]);
+  const [form, setForm] = useState({ employeeCode: '', name: '', email: '', department: '', team: '', designation: '', role: '', password: '' });
   const [showForm, setShowForm] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [csvText, setCsvText] = useState('');
@@ -15,27 +16,37 @@ export default function Employees() {
   const [search, setSearch] = useState('');
   const [dept, setDept] = useState('');
   const [error, setError] = useState('');
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [transferForm, setTransferForm] = useState({ department: '', team: '', reason: '' });
 
   function load() {
     api.get('/employees').then((res) => setEmployees(res.data)).catch(() => setError("Employees isn't included in your role's permissions"));
+    api.get('/admin/departments').then((res) => setDepts(res.data)).catch(() => setDepts([]));
   }
   useEffect(load, []);
 
   async function createEmployee(e) {
     e.preventDefault();
     await api.post('/employees', form);
-    setForm({ employeeCode: '', name: '', email: '', department: '', designation: '', role: '', password: '' });
+    setForm({ employeeCode: '', name: '', email: '', department: '', team: '', designation: '', role: '', password: '' });
     setShowForm(false);
     load();
   }
 
-  async function transfer(id, currentDept) {
-    const department = prompt('Transfer to which department?', currentDept || '');
-    if (!department) return;
-    const reason = prompt('Reason (optional)') || '';
-    await api.post(`/employees/${id}/transfer`, { department, reason });
+  function openTransfer(employee) {
+    setTransferTarget(employee);
+    setTransferForm({ department: employee.department || '', team: employee.team || '', reason: '' });
+  }
+
+  async function submitTransfer(e) {
+    e.preventDefault();
+    await api.post(`/employees/${transferTarget.id}/transfer`, transferForm);
+    setTransferTarget(null);
     load();
   }
+
+  const formTeams = depts.find((d) => d.name === form.department)?.teams || [];
+  const transferTeams = depts.find((d) => d.name === transferForm.department)?.teams || [];
 
   async function toggleLock(id) {
     await api.patch(`/employees/${id}/toggle-lock`);
@@ -122,7 +133,22 @@ export default function Employees() {
           <div className="grid-2">
             <label className="field"><span>Employee ID (optional — auto if blank)</span><input value={form.employeeCode} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} /></label>
             <label className="field"><span>Full Name</span><input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
-            <label className="field"><span>Department</span><input required value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
+            <label className="field">
+              <span>Department</span>
+              <select required value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value, team: '' })}>
+                <option value="">Select department</option>
+                {depts.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+              </select>
+            </label>
+            {formTeams.length > 0 && (
+              <label className="field">
+                <span>Team</span>
+                <select value={form.team} onChange={(e) => setForm({ ...form, team: e.target.value })}>
+                  <option value="">No team</option>
+                  {formTeams.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+              </label>
+            )}
             <label className="field">
               <span>Role</span>
               <select required value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value, designation: e.target.options[e.target.selectedIndex].text })}>
@@ -144,6 +170,33 @@ export default function Employees() {
         </form>
       )}
 
+      {transferTarget && (
+        <form className="card section" onSubmit={submitTransfer} style={{ borderColor: 'var(--warn)' }}>
+          <h3>Transfer {transferTarget.name}</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Department</span>
+              <select required value={transferForm.department} onChange={(e) => setTransferForm({ ...transferForm, department: e.target.value, team: '' })}>
+                <option value="">Select department</option>
+                {depts.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+              </select>
+            </label>
+            {transferTeams.length > 0 && (
+              <label className="field">
+                <span>Team</span>
+                <select value={transferForm.team} onChange={(e) => setTransferForm({ ...transferForm, team: e.target.value })}>
+                  <option value="">No team</option>
+                  {transferTeams.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+              </label>
+            )}
+            <label className="field"><span>Reason (optional)</span><input value={transferForm.reason} onChange={(e) => setTransferForm({ ...transferForm, reason: e.target.value })} /></label>
+          </div>
+          <button className="btn btn-primary btn-sm" type="submit">Confirm Transfer</button>{' '}
+          <button className="btn btn-sm" type="button" onClick={() => setTransferTarget(null)}>Cancel</button>
+        </form>
+      )}
+
       <div className="filter-row">
         <input placeholder="Search name…" value={search} onChange={(e) => setSearch(e.target.value)} />
         <select value={dept} onChange={(e) => setDept(e.target.value)}>
@@ -154,13 +207,14 @@ export default function Employees() {
 
       <div className="tbl-wrap">
         <table>
-          <thead><tr><th>Employee</th><th>Code</th><th>Department</th><th>Designation</th><th>Status</th><th>Profile Stage</th><th>Completion</th><th></th></tr></thead>
+          <thead><tr><th>Employee</th><th>Code</th><th>Department</th><th>Team</th><th>Designation</th><th>Status</th><th>Profile Stage</th><th>Completion</th><th></th></tr></thead>
           <tbody>
             {filtered.map((e) => (
               <tr key={e.id} className="row-link">
                 <td><Link to={`/employees/${e.id}`}>{e.name}</Link></td>
                 <td>{e.employeeCode}</td>
                 <td>{e.department || '—'}</td>
+                <td>{e.team || '—'}</td>
                 <td>{e.designation || '—'}</td>
                 <td><span className={`status ${e.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(e.employmentStatus) ? 'priority-high' : ''}`}>{e.employmentStatus}</span></td>
                 <td><span className={`status ${e.profileStage === 'Locked' ? 'priority-low' : e.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{e.profileStage === 'Locked' ? '🔒 Locked' : e.profileStage}</span></td>
@@ -173,7 +227,7 @@ export default function Employees() {
                           <Link className="btn btn-sm" to={`/employees/${e.id}`}>Edit</Link>{' '}
                           <button className="btn btn-sm" onClick={() => togglePause(e.id)}>{e.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>{' '}
                           <button className="btn btn-sm" onClick={() => toggleLock(e.id)}>{e.isLocked ? 'Unlock' : 'Lock'}</button>{' '}
-                          <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>{' '}
+                          <button className="btn btn-sm" onClick={() => openTransfer(e)}>Transfer</button>{' '}
                         </>
                       )}
                       <button className="btn btn-sm" onClick={() => deleteEmployee(e.id, e.name)}>Delete</button>
@@ -184,7 +238,7 @@ export default function Employees() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan="8" className="small-muted">No employees match.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan="9" className="small-muted">No employees match.</td></tr>}
           </tbody>
         </table>
       </div>

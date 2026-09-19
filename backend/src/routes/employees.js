@@ -178,7 +178,7 @@ router.get('/:id', async (req, res) => {
 // login account together, in one step (matching the reference app's combined flow).
 router.post('/', requireRole(...HR_ROLES), async (req, res) => {
   let { employeeCode, department } = req.body;
-  const { name, email, phone, designation, location, dateOfJoining, dateOfBirth, gender, employeeType, role, password, branch } = req.body;
+  const { name, email, phone, team, designation, location, dateOfJoining, dateOfBirth, gender, employeeType, role, password, branch } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   if (!employeeCode) {
     const count = await prisma.employee.count();
@@ -197,7 +197,7 @@ router.post('/', requireRole(...HR_ROLES), async (req, res) => {
 
   const employee = await prisma.employee.create({
     data: {
-      employeeCode, name, email, phone, department, designation, location, gender, employeeType, branch, userId,
+      employeeCode, name, email, phone, department, team, designation, location, gender, employeeType, branch, userId,
       dateOfJoining: dateOfJoining ? new Date(dateOfJoining) : null,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
       onboardingTasks: JSON.stringify(DEFAULT_ONBOARDING_TASKS.map((task) => ({ task, completed: false }))),
@@ -214,7 +214,7 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req, res) => {
   const existingForScope = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existingForScope) return res.status(404).json({ error: 'Employee not found' });
   const editableFields = [
-    'name', 'email', 'phone', 'department', 'designation', 'location', 'employmentStatus', 'employeeType',
+    'name', 'email', 'phone', 'department', 'team', 'designation', 'location', 'employmentStatus', 'employeeType',
     'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'address', 'addressType',
     'addressLine1', 'addressLine2', 'city', 'district', 'state', 'country', 'postalCode', 'bloodGroup',
     'branch', 'shift', 'employmentExperience', 'educationDetails', 'skills',
@@ -335,11 +335,11 @@ router.patch('/:id/toggle-pause', requireRole(...ADMIN_ROLES), async (req, res) 
 
 // Transfer an employee to a new department, keeping a note in the audit trail.
 router.post('/:id/transfer', requireRole(...ADMIN_ROLES), async (req, res) => {
-  const { department, reason } = req.body;
+  const { department, team, reason } = req.body;
   if (!department) return res.status(400).json({ error: 'department is required' });
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
-  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { department } });
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { department, team: team || null } });
   await logAudit({ userId: req.user.id, action: 'Employee transferred' + (reason ? ` (${reason})` : ''), entity: 'Employee', entityId: employee.id, fromValue: existing.department, toValue: department });
   res.json(withComputed(employee));
 });

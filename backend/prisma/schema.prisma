@@ -111,6 +111,28 @@ model AuditLog {
 // HRMS
 // =============================================================================
 
+// Super Admin-managed lists that populate the Department/Team dropdowns
+// elsewhere in the app (e.g. adding an employee). Employee.department/team
+// stay plain strings (matching the name here) rather than foreign keys, so
+// existing employee records never break if a department is later renamed.
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  teams Team[]
+}
+
+model Team {
+  id           String     @id @default(cuid())
+  name         String
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([departmentId, name])
+}
+
 model Employee {
   id                String   @id @default(cuid())
   userId            String?  @unique
@@ -120,6 +142,7 @@ model Employee {
   email             String?
   phone             String?
   department        String?
+  team              String?
   designation       String?
   location          String?
   dateOfJoining     DateTime?

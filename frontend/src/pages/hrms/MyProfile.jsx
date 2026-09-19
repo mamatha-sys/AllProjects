@@ -210,6 +210,7 @@ export default function MyProfile() {
       <div className="card">
         <h3 style={{ fontSize: 13, marginBottom: 8 }}>Read-only details (set by HR)</h3>
         <div className="kv"><span className="k">Department</span><span>{employee.department || '—'}</span></div>
+        <div className="kv"><span className="k">Team</span><span>{employee.team || '—'}</span></div>
         <div className="kv"><span className="k">Designation</span><span>{employee.designation || '—'}</span></div>
         <div className="kv"><span className="k">Reporting Manager</span><span>{employee.reportingManager?.name || '—'}</span></div>
         <div className="kv"><span className="k">Joining Date</span><span>{employee.dateOfJoining ? new Date(employee.dateOfJoining).toLocaleDateString() : '—'}</span></div>
