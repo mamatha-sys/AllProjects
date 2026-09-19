@@ -855,3 +855,45 @@ model Notification {
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 }
+
+// =============================================================================
+// JOB PORTAL INTEGRATION (Administration > Integrations)
+// =============================================================================
+
+// One row per channel in the generic integration catalog (WhatsApp, SMTP, Naukri, etc.
+// — the catalog's fixed id/name/fields live in backend/src/utils/integrationCatalog.js).
+model IntegrationChannel {
+  id        String   @id // matches a catalog entry's key, e.g. 'whatsapp'
+  enabled   Boolean  @default(false)
+  connected Boolean  @default(false)
+  values    String? // JSON-encoded {field: value}
+  updatedAt DateTime @updatedAt
+}
+
+// Audit trail of Job Portal sync attempts, surfaced on Administration > Integrations.
+model SyncLogEntry {
+  id       String   @id @default(cuid())
+  date     DateTime @default(now())
+  entity   String
+  status   String // Success | Failed | Needs Mapping
+  reason   String?
+}
+
+// A Job Portal application that couldn't be auto-linked to an existing open
+// Requirement — parked here until HR maps it, creates a draft requirement from
+// it, or archives it. Populated by the public apply flow when the referenced
+// requirement can no longer be resolved (e.g. closed/removed between page load
+// and submit).
+model MappingQueueRow {
+  id                     String   @id @default(cuid())
+  jobPortalJobId         String   @unique
+  jobTitle               String
+  source                 String?  @default("Job Portal")
+  applicationCount       Int      @default(0)
+  dateReceived           DateTime @default(now())
+  status                 String   @default("Needs Mapping") // Needs Mapping | Mapped | Archived
+  sampleSkills           String?
+  sampleLocation         String?
+  suggestedRequirementId String?
+  mappedTo               String?
+}

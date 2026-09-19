@@ -25,9 +25,18 @@ router.get('/ats', async (req, res) => {
 });
 
 router.get('/job-portal', async (req, res) => {
-  const candidates = await prisma.candidate.findMany();
+  const [candidates, applicationsSynced] = await Promise.all([
+    prisma.candidate.findMany(),
+    prisma.application.count(),
+  ]);
   const sources = ['Job Portal', 'Naukri', 'Indeed', 'LinkedIn', 'TeamLink Website'];
-  res.json(sources.map((s) => ({ source: s, candidates: candidates.filter((c) => c.source === s).length })));
+  res.json({
+    registrationsSynced: candidates.filter((c) => c.source === 'Job Portal').length,
+    applicationsSynced,
+    fromNaukri: candidates.filter((c) => c.source === 'Naukri').length,
+    fromLinkedIn: candidates.filter((c) => c.source === 'LinkedIn').length,
+    bySource: sources.map((s) => ({ source: s, candidates: candidates.filter((c) => c.source === s).length })),
+  });
 });
 
 router.get('/accounts', async (req, res) => {
