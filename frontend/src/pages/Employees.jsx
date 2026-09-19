@@ -34,6 +34,16 @@ export default function Employees() {
     load();
   }
 
+  async function toggleLock(id) {
+    await api.patch(`/employees/${id}/toggle-lock`);
+    load();
+  }
+
+  async function togglePause(id) {
+    await api.patch(`/employees/${id}/toggle-pause`);
+    load();
+  }
+
   function parseCsv(text) {
     const lines = text.trim().split(/\r?\n/).filter(Boolean);
     if (!lines.length) return [];
@@ -146,7 +156,16 @@ export default function Employees() {
                 <td><span className={`status ${e.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(e.employmentStatus) ? 'priority-high' : ''}`}>{e.employmentStatus}</span></td>
                 <td><span className={`status ${e.profileStage === 'Locked' ? 'priority-low' : e.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{e.profileStage === 'Locked' ? '🔒 Locked' : e.profileStage}</span></td>
                 <td>{e.profileCompletionPct}%</td>
-                <td>{!['Exited', 'Relieved'].includes(e.employmentStatus) && <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  {!['Exited', 'Relieved'].includes(e.employmentStatus) && (
+                    <>
+                      <Link className="btn btn-sm" to={`/employees/${e.id}`}>Edit</Link>{' '}
+                      <button className="btn btn-sm" onClick={() => togglePause(e.id)}>{e.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>{' '}
+                      <button className="btn btn-sm" onClick={() => toggleLock(e.id)}>{e.isLocked ? 'Unlock' : 'Lock'}</button>{' '}
+                      <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
             {filtered.length === 0 && <tr><td colSpan="8" className="small-muted">No employees match.</td></tr>}

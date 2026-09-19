@@ -243,6 +243,31 @@ router.patch('/:id/unlock-request/reject', requireRole(...HR_ROLES), async (req,
   res.json(withComputed(employee));
 });
 
+// Direct HR lock/unlock toggle — no request/reason needed, unlike the employee's
+// own unlock-request flow above. Used from the employee list's row actions.
+router.patch('/:id/toggle-lock', requireRole(...HR_ROLES), async (req, res) => {
+  const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  const nextLocked = !existing.isLocked;
+  const employee = await prisma.employee.update({
+    where: { id: req.params.id },
+    data: { isLocked: nextLocked, profileStage: nextLocked ? 'Locked' : 'Assigned', unlockRequestStatus: nextLocked ? existing.unlockRequestStatus : null },
+  });
+  await logAudit({ userId: req.user.id, action: nextLocked ? 'Profile locked by HR' : 'Profile unlocked by HR', entity: 'Employee', entityId: employee.id });
+  res.json(withComputed(employee));
+});
+
+// Pause/resume — toggles Active <-> On Probation, mirroring the reference app's
+// row-level Pause button (used e.g. to pause someone during a review).
+router.patch('/:id/toggle-pause', requireRole(...HR_ROLES), async (req, res) => {
+  const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  const nextStatus = existing.employmentStatus === 'On Probation' ? 'Active' : 'On Probation';
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { employmentStatus: nextStatus } });
+  await logAudit({ userId: req.user.id, action: 'Employee status toggled', entity: 'Employee', entityId: employee.id, fromValue: existing.employmentStatus, toValue: nextStatus });
+  res.json(withComputed(employee));
+});
+
 // Transfer an employee to a new department, keeping a note in the audit trail.
 router.post('/:id/transfer', requireRole(...HR_ROLES), async (req, res) => {
   const { department, reason } = req.body;

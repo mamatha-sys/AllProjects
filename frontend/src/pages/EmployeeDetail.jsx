@@ -67,6 +67,16 @@ export default function EmployeeDetail() {
     load();
   }
 
+  async function toggleLock() {
+    await api.patch(`/employees/${id}/toggle-lock`);
+    load();
+  }
+
+  async function togglePause() {
+    await api.patch(`/employees/${id}/toggle-pause`);
+    load();
+  }
+
   if (!employee) return <div className="small-muted">Loading…</div>;
 
   const onboardingDone = employee.onboardingTasks ? employee.onboardingTasks.filter((t) => t.completed).length : 0;
@@ -82,6 +92,8 @@ export default function EmployeeDetail() {
           <span className={`status ${employee.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(employee.employmentStatus) ? 'priority-high' : ''}`}>{employee.employmentStatus}</span>
           <span className={`status ${employee.profileStage === 'Locked' ? 'priority-low' : employee.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{employee.profileStage === 'Locked' ? '🔒 Locked' : employee.profileStage}</span>
           {isHR && !editing && <button className="btn btn-sm" onClick={startEdit}>Edit</button>}
+          {isHR && <button className="btn btn-sm" onClick={togglePause}>{employee.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>}
+          {isHR && <button className="btn btn-sm" onClick={toggleLock}>{employee.isLocked ? 'Unlock' : 'Lock'}</button>}
         </div>
       </div>
 
