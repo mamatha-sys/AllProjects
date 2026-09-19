@@ -97,7 +97,7 @@ export default function HrmsDashboard() {
           <Link className="btn btn-sm" to="/payroll">Payroll & Compensation</Link>
           <Link className="btn btn-sm" to="/performance">Performance & Development</Link>
           <Link className="btn btn-sm" to="/employee-services">Employee Services</Link>
-          {isHR && <Link className="btn btn-sm" to="/employees">Employee Directory</Link>}
+          {isHR && <Link className="btn btn-sm" to="/employees">Employee Management</Link>}
           {!isHR && <Link className="btn btn-sm" to="/my-profile">My Profile</Link>}
         </div>
       </div>
