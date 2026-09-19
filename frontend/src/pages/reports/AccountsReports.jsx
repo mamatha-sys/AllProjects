@@ -1,14 +1,29 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import { downloadCsv } from '../../utils/csv.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const EXPORT_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 
 export default function AccountsReports() {
+  const { user } = useAuth();
+  const canExport = EXPORT_ROLES.includes(user?.role);
   const [data, setData] = useState(null);
+  const [client, setClient] = useState('');
 
-  useEffect(() => {
-    api.get('/reports/accounts').then((res) => setData(res.data));
-  }, []);
+  function load(clientFilter) {
+    api.get('/reports/accounts', { params: clientFilter ? { client: clientFilter } : {} }).then((res) => setData(res.data));
+  }
+  useEffect(() => load(), []);
+
+  function exportCsv() {
+    downloadCsv(
+      'accounts-report.csv',
+      ['Client', 'Invoiced', 'Paid', 'Pending'],
+      data.invoicedPaidPending.map((r) => [r.client, r.invoiced, r.paid, r.pending])
+    );
+  }
 
   if (!data) return <div className="small-muted">Loading…</div>;
 
@@ -27,6 +42,32 @@ export default function AccountsReports() {
         <Stat n={money(data.profitAndLoss.profit)} l="Profit" />
         <Stat n={money(data.tdsDeducted)} l="TDS deducted" />
         <Stat n={data.reconciliation.unmatched} l="Unmatched bank lines" />
+      </div>
+
+      <div className="card section">
+        <h3>Client / Invoiced / Paid / Pending</h3>
+        <div className="filter-row">
+          <select value={client} onChange={(e) => setClient(e.target.value)}>
+            <option value="">All clients</option>
+            {data.byClient.map((r) => <option key={r.client} value={r.client}>{r.client}</option>)}
+          </select>
+          <button className="btn btn-sm btn-primary" onClick={() => load(client)}>Apply</button>
+          <button className="btn btn-sm" onClick={() => { setClient(''); load(); }}>Clear</button>
+          {canExport
+            ? <button className="btn btn-sm" onClick={exportCsv}>Export CSV</button>
+            : <span className="small-muted">Export isn't included in your role's permissions</span>}
+        </div>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Client</th><th>Invoiced</th><th>Paid</th><th>Pending</th></tr></thead>
+            <tbody>
+              {data.invoicedPaidPending.map((r) => (
+                <tr key={r.client}><td>{r.client}</td><td>{money(r.invoiced)}</td><td>{money(r.paid)}</td><td>{money(r.pending)}</td></tr>
+              ))}
+              {data.invoicedPaidPending.length === 0 && <tr><td colSpan="4" className="small-muted" style={{ padding: 16 }}>No data for this filter.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card section">

@@ -1,17 +1,28 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import AccountsDashboard from './AccountsDashboard.jsx';
 
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
+const NOT_CLIENT = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL', 'RECRUITER', 'BDE'];
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [stats, setStats] = useState(null);
+  const [jp, setJp] = useState(null);
 
   useEffect(() => {
     api.get('/dashboard').then((res) => setStats(res.data));
-  }, []);
+    if (NOT_CLIENT.includes(user?.role)) {
+      api.get('/integrations/job-portal').then((res) => setJp(res.data)).catch(() => setJp(null));
+    }
+  }, [user?.role]);
+
+  async function syncNow() {
+    await api.post('/integrations/job-portal/sync');
+    api.get('/integrations/job-portal').then((res) => setJp(res.data));
+  }
 
   if (!stats) return <div className="small-muted">Loading dashboard…</div>;
 
@@ -37,6 +48,24 @@ export default function Dashboard() {
         <Stat n={stats.invoicesOverdue} l="Overdue invoices" />
       </div>
       {ACCOUNTS_ROLES.includes(user?.role) && <AccountsDashboard />}
+
+      {jp && (
+        <div className="card section">
+          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Job Portal Integration</h3>
+          <div className="kv"><span className="k">Connection</span><span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 4, background: jp.status === 'Connected' ? '#1e8449' : '#c0392b', marginRight: 6 }} />{jp.status}</span></div>
+          <div className="kv"><span className="k">Last Sync</span><span>{jp.lastSync ? new Date(jp.lastSync).toLocaleString() : '—'}</span></div>
+          <div className="kv"><span className="k">Candidates Synced</span><span>{jp.candidatesSynced}</span></div>
+          {jp.requirementsNeedingMapping > 0 && (
+            <div className="kv"><span className="k">Needs Mapping</span><span className="status priority-high">{jp.requirementsNeedingMapping}</span></div>
+          )}
+          <div style={{ marginTop: 8 }}>
+            <button className="btn btn-sm btn-primary" onClick={syncNow}>Sync</button>{' '}
+            <a className="btn btn-sm" href="/careers" target="_blank" rel="noreferrer">Open Job Portal ↗</a>
+          </div>
+          <div style={{ marginTop: 8 }}><Link className="link-btn" to="/admin/integrations">Full integration details →</Link></div>
+        </div>
+      )}
+
       <div className="card section">
         <h3>Pipeline by stage</h3>
         <div className="tbl-wrap">

@@ -32,16 +32,32 @@ router.get('/accounts', async (req, res) => {
     .slice(0, 8);
   const unreconciled = transactions.filter((t) => ['Unmatched', 'Matched'].includes(txnState(t)));
 
+  const recentInvoices = [...rows]
+    .sort((a, b) => String(b.invoiceDate || '').localeCompare(String(a.invoiceDate || '')))
+    .slice(0, 6);
+
+  const byClient = {};
+  rows.forEach((i) => { byClient[i.client] = (byClient[i.client] || 0) + i.total; });
+  const byClientList = Object.entries(byClient)
+    .filter(([, total]) => total)
+    .map(([client, total]) => ({ client, total: ROUND(total) }))
+    .sort((a, b) => b.total - a.total);
+
   res.json({
     invoices: rows.length,
     pending: rows.filter((i) => i.status === 'Pending').length,
     partiallyPaid: rows.filter((i) => i.status === 'Partially Paid').length,
     overdue: rows.filter((i) => i.status === 'Overdue').length,
     paid: rows.filter((i) => i.status === 'Paid').length,
+    collected: ROUND(rows.filter((i) => i.status === 'Paid').reduce((s, i) => s + i.total, 0)),
+    pendingAmount: ROUND(rows.filter((i) => i.status === 'Pending').reduce((s, i) => s + i.total, 0)),
     unreconciled: unreconciled.length,
+    unmatched: transactions.filter((t) => txnState(t) === 'Unmatched').length,
     outstanding: ROUND(rows.filter((i) => i.status !== 'Cancelled').reduce((s, i) => s + i.outstanding, 0)),
     received: ROUND(invoices.reduce((s, i) => s + Number(i.receivedAmount || 0), 0)),
     needsAttention,
+    recentInvoices,
+    byClient: byClientList,
     unreconciledTransactions: unreconciled.slice(0, 8).map((t) => ({
       id: t.id, date: t.date, description: t.description, type: t.type, amount: t.amount, state: txnState(t),
     })),

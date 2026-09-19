@@ -19,12 +19,38 @@ export default function AccountsDashboard() {
   return (
     <>
       <div className="statbar">
-        <Stat n={data.invoices} l="Invoices" />
-        <Stat n={data.pending} l="Pending" />
-        <Stat n={data.partiallyPaid} l="Partially paid" />
-        <Stat n={data.overdue} l="Overdue" />
-        <Stat n={data.unreconciled} l="Unreconciled bank lines" />
-        <Stat n={money(data.outstanding)} l="Outstanding" />
+        <Stat n={money(data.collected)} l="Collected" />
+        <Stat n={money(data.pendingAmount)} l="Pending" />
+        <Stat n={data.overdue} l="Overdue invoices" />
+        <Stat n={data.unmatched} l="Unmatched transactions" />
+      </div>
+
+      <div className="card section">
+        <h3>Recent invoices</h3>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Invoice</th><th>Client</th><th>Amount</th><th>Status</th></tr></thead>
+            <tbody>
+              {data.recentInvoices.map((i) => (
+                <tr key={i.id} className="row-link">
+                  <td><Link to={`/invoices/${i.id}`}>{i.invoiceNumber || i.id.slice(-6)}</Link></td>
+                  <td>{i.client}</td>
+                  <td>{money(i.total)}</td>
+                  <td><span className={`status ${statusClass(i.status)}`}>{i.status}</span></td>
+                </tr>
+              ))}
+              {data.recentInvoices.length === 0 && <tr><td colSpan="4" className="small-muted">No invoices yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card section">
+        <h3>By client</h3>
+        {data.byClient.map((c) => (
+          <div className="kv" key={c.client}><span className="k">{c.client}</span><span>{money(c.total)}</span></div>
+        ))}
+        {data.byClient.length === 0 && <div className="small-muted">No invoices yet.</div>}
       </div>
 
       <div className="card section">

@@ -45,6 +45,9 @@ export default function InvoiceDetail() {
 
   return (
     <div>
+      <div className="small-muted">
+        <Link to="/invoices">Invoices</Link> / {invoice.invoiceNumber || invoice.id}
+      </div>
       <Link className="small-muted" to="/invoices">← Back to invoices</Link>
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
@@ -57,20 +60,27 @@ export default function InvoiceDetail() {
       {error && <div className="card section error-text" style={{ marginBottom: 12 }}>{error}</div>}
 
       <div className="card section">
-        <h3>Invoice</h3>
+        <h3>Commercial trail — Client → Requirement → Candidate → Joining</h3>
+        <div className="kv"><span className="k">Client</span><span>{invoice.client?.name || '—'}</span></div>
+        <div className="kv"><span className="k">Requirement</span><span>{invoice.requirement?.title || '—'}{invoice.requirement?.department ? ` · ${invoice.requirement.department}` : ''}</span></div>
         <div className="kv"><span className="k">Candidate</span><span>{invoice.candidate?.name || '—'}</span></div>
-        <div className="kv"><span className="k">Requirement</span><span>{invoice.requirement?.title || '—'}</span></div>
+        <div className="kv"><span className="k">Application</span><span>{invoice.applicationId || '—'}</span></div>
+        <div className="kv"><span className="k">Recruiter / BDE / TL</span><span>{invoice.requirement?.recruiter?.name || '—'} / {invoice.requirement?.bde?.name || '—'} / {invoice.requirement?.tl || '—'}</span></div>
+        <div className="kv"><span className="k">Joining Date</span><span>{invoice.joiningDate || '—'}</span></div>
         <div className="kv"><span className="k">Invoice Date</span><span>{invoice.invoiceDate}</span></div>
         <div className="kv"><span className="k">Due Date</span><span>{invoice.dueDate || '—'}</span></div>
+        <div className="kv"><span className="k">Offered CTC</span><span>{invoice.offeredCtc ? money(invoice.offeredCtc) : '—'}</span></div>
+        <div className="kv"><span className="k">Agreement Fee %</span><span>{invoice.feePercent != null ? `${invoice.feePercent}%` : '—'}</span></div>
+        <div className="kv"><span className="k">Fee Amount</span><span>{money(invoice.amount)}</span></div>
+        <div className="kv"><span className="k">GST</span><span>+ {money(invoice.gst)}</span></div>
+        <div className="kv"><span className="k">TDS deducted at source</span><span>− {money(invoice.tds)}</span></div>
+        <div className="kv"><span className="k">Total Invoice Amount</span><span style={{ fontWeight: 700 }}>{money(invoice.amount + invoice.gst)}</span></div>
         <div className="kv"><span className="k">Payment Terms</span><span>{invoice.paymentTerms}</span></div>
         {invoice.paidDate && <div className="kv"><span className="k">Paid On</span><span>{invoice.paidDate}</span></div>}
       </div>
 
       <div className="card section">
         <h3>What it is worth</h3>
-        <div className="kv"><span className="k">Amount</span><span>{money(invoice.amount)}</span></div>
-        <div className="kv"><span className="k">GST</span><span>+ {money(invoice.gst)}</span></div>
-        <div className="kv"><span className="k">TDS deducted at source</span><span>− {money(invoice.tds)}</span></div>
         <div className="kv"><span className="k">Total payable</span><span style={{ fontWeight: 700 }}>{money(invoice.total)}</span></div>
         <div className="kv"><span className="k">Received</span><span>{money(invoice.receivedAmount)}</span></div>
         <div className="kv"><span className="k">Outstanding</span><span style={{ fontWeight: 700 }}>{money(invoice.outstanding)}</span></div>
@@ -135,13 +145,18 @@ export default function InvoiceDetail() {
         )}
       </div>
 
-      {invoice.candidate && (
+      {(invoice.candidate || invoice.requirement || invoice.client) && (
         <div className="card section">
           <h3>Linked candidate journey</h3>
-          <div><Link to={`/candidates/${invoice.candidate.id}`}>View candidate in ATS →</Link></div>
+          {invoice.candidate && <div><Link to={`/candidates/${invoice.candidate.id}`}>View candidate in ATS →</Link></div>}
           {invoice.requirement && (
             <div style={{ marginTop: 8 }}>
               <Link to={`/requirements/${invoice.requirement.id}`}>View requirement in ATS →</Link>
+            </div>
+          )}
+          {invoice.client && (
+            <div style={{ marginTop: 8 }}>
+              <Link to={`/clients/${invoice.client.id}`}>View client in ATS →</Link>
             </div>
           )}
         </div>

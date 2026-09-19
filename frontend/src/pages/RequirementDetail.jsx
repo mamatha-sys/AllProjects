@@ -21,6 +21,7 @@ export default function RequirementDetail() {
   const [matching, setMatching] = useState([]);
   const [linkCandidateId, setLinkCandidateId] = useState('');
   const [error, setError] = useState('');
+  const [matchDetail, setMatchDetail] = useState(null);
 
   function load() {
     api.get(`/requirements/${id}`).then((res) => setRequirement(res.data));
@@ -170,7 +171,7 @@ export default function RequirementDetail() {
                         ? c.match.missingSkills.slice(0, 3).join(', ')
                         : <span className="status priority-low">None</span>}
                     </td>
-                    <td><span className="status">{c.match.overall}%</span></td>
+                    <td><button className="link-btn" onClick={() => setMatchDetail(c)}><span className="status">{c.match.overall}%</span></button></td>
                     <td><button className="btn btn-sm" onClick={(e) => linkCandidate(e, c.id)}>Add to Pipeline</button></td>
                   </tr>
                 ))}
@@ -205,6 +206,24 @@ export default function RequirementDetail() {
           </table>
         </div>
       </div>
+
+      {matchDetail && (
+        <div className="card section" style={{ borderColor: 'var(--warn)' }}>
+          <div className="page-head" style={{ marginBottom: 8 }}>
+            <h3>{matchDetail.name} × {requirement.title}</h3>
+            <button className="btn btn-sm" onClick={() => setMatchDetail(null)}>Close</button>
+          </div>
+          <div className="small-muted" style={{ fontWeight: 700, marginBottom: 6 }}>What increased the score</div>
+          {matchDetail.match.reasons?.length
+            ? matchDetail.match.reasons.map((r, i) => <div key={i} style={{ color: 'var(--teal, #1e8449)' }}>✓ {r}</div>)
+            : <div className="small-muted">No positive signals — the score comes from defaults only.</div>}
+          <div className="small-muted" style={{ fontWeight: 700, margin: '12px 0 6px' }}>What reduced the score</div>
+          {matchDetail.match.gaps?.length
+            ? matchDetail.match.gaps.map((g, i) => <div key={i} style={{ color: 'var(--red, #c0392b)' }}>− {g}</div>)
+            : <div className="small-muted">Nothing reduced the score on the data available.</div>}
+          <div className="small-muted" style={{ marginTop: 12, fontStyle: 'italic' }}>Deterministic score — the same candidate and requirement always produce the same result. Mandatory skills carry the heaviest weight.</div>
+        </div>
+      )}
     </div>
   );
 }

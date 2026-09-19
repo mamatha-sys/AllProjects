@@ -89,14 +89,21 @@ router.get('/summary', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const invoice = await prisma.invoice.findUnique({
     where: { id: req.params.id },
-    include: { client: true, candidate: true, requirement: true, payments: { orderBy: { date: 'asc' } } },
+    include: {
+      client: true, candidate: true,
+      requirement: { include: { recruiter: true, bde: true } },
+      payments: { orderBy: { date: 'asc' } },
+    },
   });
   if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
   if (req.user.role === 'CLIENT' && invoice.clientId !== req.user.clientId) {
     return res.status(403).json({ error: 'This record is outside your client scope' });
   }
   const synced = await syncStatus(invoice);
-  res.json(decorate(synced));
+  const application = invoice.candidateId && invoice.requirementId
+    ? await prisma.application.findUnique({ where: { candidateId_requirementId: { candidateId: invoice.candidateId, requirementId: invoice.requirementId } } })
+    : null;
+  res.json({ ...decorate(synced), applicationId: application?.id || null });
 });
 
 router.post('/', requireRole(...ACCOUNTS_ROLES), async (req, res) => {

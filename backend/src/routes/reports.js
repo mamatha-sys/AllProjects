@@ -86,6 +86,19 @@ router.get('/accounts', async (req, res) => {
     byClientMap.set(k, cur);
   });
 
+  // Client / Invoiced / Paid / Pending — the Accounts Reports export shape.
+  const invoicedPaidPendingMap = new Map();
+  rows.filter((i) => i.derived !== 'Cancelled').forEach((i) => {
+    const k = i.client?.name || '—';
+    const cur = invoicedPaidPendingMap.get(k) || { client: k, invoiced: 0, paid: 0, pending: 0 };
+    cur.invoiced = ROUND(cur.invoiced + i.total);
+    if (i.derived === 'Paid') cur.paid = ROUND(cur.paid + i.total);
+    else cur.pending = ROUND(cur.pending + i.outstanding);
+    invoicedPaidPendingMap.set(k, cur);
+  });
+  let invoicedPaidPending = [...invoicedPaidPendingMap.values()];
+  if (req.query.client) invoicedPaidPending = invoicedPaidPending.filter((r) => r.client === req.query.client);
+
   const gstCharged = ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.gst || 0), 0));
   const gstPaid = ROUND(expenses.reduce((s, e) => s + Number(e.gstAmount || 0), 0));
   const incomeNet = ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.amount || 0), 0));
@@ -95,6 +108,7 @@ router.get('/accounts', async (req, res) => {
     byStatus,
     ageing: buckets,
     byClient: [...byClientMap.values()].sort((a, b) => b.outstanding - a.outstanding),
+    invoicedPaidPending,
     gstPosition: { charged: gstCharged, paid: gstPaid, payable: ROUND(gstCharged - gstPaid) },
     tdsDeducted: ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.tds || 0), 0)),
     profitAndLoss: { incomeNet, spendNet, profit: ROUND(incomeNet - spendNet) },
