@@ -112,20 +112,19 @@ router.get('/agreement/:token', async (req, res) => {
     return res.status(404).json({ error: 'This signing link is not valid — ask TeamLink to resend it' });
   }
 
-  // First open marks the agreement as viewed, as the prototype's e-sign portal does.
-  if (client.agreementStatus === 'SENT') {
-    await prisma.client.update({
-      where: { id: client.id },
-      data: { agreementStatus: 'VIEWED', agreementViewedAt: new Date() },
-    });
-    await logAudit({ action: 'Agreement opened by client', entity: 'Client', entityId: client.id, fromValue: 'SENT', toValue: 'VIEWED' });
+  // First open is recorded as a timestamp. The prototype has no "Viewed"
+  // agreement status — the lifecycle is Draft -> Sent -> Confirmed -> Active —
+  // so opening the link leaves the status on Sent.
+  if (client.agreementStatus === 'SENT' && !client.agreementViewedAt) {
+    await prisma.client.update({ where: { id: client.id }, data: { agreementViewedAt: new Date() } });
+    await logAudit({ action: 'Agreement opened by client', entity: 'Client', entityId: client.id, toValue: 'Sent' });
   }
 
   res.json({
     clientName: client.name,
     agreementId: client.agreementId,
     document: client.agreementDocument,
-    status: client.agreementStatus === 'SENT' ? 'VIEWED' : client.agreementStatus,
+    status: client.agreementStatus,
     signedAt: client.agreementSignedAt,
     signedBy: client.agreementSignedBy,
     signedByTitle: client.agreementSignedByTitle,
@@ -140,15 +139,17 @@ router.post('/agreement/:token/sign', async (req, res) => {
   if (!client || !client.agreementDocument) {
     return res.status(404).json({ error: 'This signing link is not valid — ask TeamLink to resend it' });
   }
-  if (client.agreementStatus === 'SIGNED') return res.status(409).json({ error: 'This agreement has already been signed' });
-  if (!['SENT', 'VIEWED'].includes(client.agreementStatus)) {
+  if (['CONFIRMED', 'ACTIVE'].includes(client.agreementStatus)) {
+    return res.status(409).json({ error: 'This agreement has already been signed' });
+  }
+  if (client.agreementStatus !== 'SENT') {
     return res.status(400).json({ error: 'This agreement has not been sent for signature' });
   }
 
   const updated = await prisma.client.update({
     where: { id: client.id },
     data: {
-      agreementStatus: 'SIGNED',
+      agreementStatus: 'CONFIRMED',
       agreementSignedAt: new Date(),
       agreementSignedBy: signedByName,
       agreementSignedByTitle: signedByTitle || null,
@@ -156,7 +157,7 @@ router.post('/agreement/:token/sign', async (req, res) => {
   });
   await logAudit({
     action: 'Agreement e-signed via signing link', entity: 'Client',
-    entityId: client.id, fromValue: client.agreementStatus, toValue: 'SIGNED',
+    entityId: client.id, fromValue: 'Sent', toValue: 'Confirmed',
   });
 
   const owners = await prisma.requirement.findMany({ where: { clientId: client.id }, select: { recruiterId: true, bdeId: true } });

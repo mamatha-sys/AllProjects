@@ -20,14 +20,15 @@ export default function Dashboard() {
       <div className="page-head">
         <h1>Dashboard</h1>
       </div>
+      {/* The six ATS tiles, with the prototype's own labels and counts
+          (atsDashboard, line 6262). */}
       <div className="statbar">
         <Stat n={stats.openRequirements} l="Open requirements" />
-        <Stat n={stats.aiInterview} l="In AI interview" />
-        <Stat n={stats.recruiterReview} l="Awaiting recruiter review" />
-        <Stat n={stats.withBde} l="Awaiting BDE review" />
-        <Stat n={stats.clientReview} l="With client" />
-        <Stat n={stats.interviewsScheduled} l="Interviews scheduled" />
-        <Stat n={stats.hired} l="Hired this cycle" />
+        <Stat n={stats.recruiterReview} l="Recruiter review" />
+        <Stat n={stats.withBde} l="With BDE" />
+        <Stat n={stats.clientReview} l="Client review" />
+        <Stat n={stats.interviewsUpcoming} l="Interviews upcoming" />
+        <Stat n={stats.hiringOutcomes} l="Hiring outcomes this cycle" />
       </div>
       <div className="statbar">
         <Stat n={stats.activeEmployees} l="Active employees" />
@@ -36,6 +37,39 @@ export default function Dashboard() {
         <Stat n={stats.invoicesOverdue} l="Overdue invoices" />
       </div>
       {ACCOUNTS_ROLES.includes(user?.role) && <AccountsDashboard />}
+      <div className="card section">
+        <h3>Pipeline by stage</h3>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Stage</th><th>Candidates</th></tr></thead>
+            <tbody>
+              {(stats.pipelineByStage || []).map((s) => (
+                <tr key={s.stage}>
+                  <td>{s.label}</td>
+                  <td>{s.count}</td>
+                </tr>
+              ))}
+              {(!stats.pipelineByStage || stats.pipelineByStage.length === 0) && (
+                <tr><td colSpan="2" className="small-muted">No candidates in the pipeline yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card section">
+        <h3>Recruiter workload</h3>
+        {(stats.recruiterWorkload || []).map((r) => (
+          <div className="kv" key={r.name}>
+            <span className="k">{r.name}</span>
+            <span>{r.requirements} requirements</span>
+          </div>
+        ))}
+        {(!stats.recruiterWorkload || stats.recruiterWorkload.length === 0) && (
+          <div className="small-muted">No recruiters on file.</div>
+        )}
+      </div>
+
       <div className="card section">
         <h3>Recent activity</h3>
         <div className="timeline">

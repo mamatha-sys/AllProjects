@@ -2,6 +2,11 @@ const express = require('express');
 const prisma = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
+const { computeMatch } = require('../utils/matching');
+const {
+  applicationOwner, applicationNextAction, applicationDueDate, applicationIsOverdue,
+  applicationLifeStatus, stageLabel,
+} = require('../utils/atsVocab');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -22,12 +27,51 @@ async function findDuplicates({ email, phone, excludeId }) {
   });
 }
 
+// The prototype's candidate list shows, per candidate, the state of their most
+// recent application: Current Stage, Owner, Next Action, Due Date, Match Score,
+// Status and AI Interview (renderCandidateList, line 8385). Owner/Next Action/
+// Due Date are derived from the stage so they can never drift.
+function decorate(candidate, { clientScoped } = {}) {
+  let applications = candidate.applications || [];
+  if (clientScoped) applications = applications.filter((a) => a.requirement && a.requirement.clientId === clientScoped);
+
+  // candidateStageOf(): the most recent application decides the current stage.
+  const latest = [...applications].sort((a, b) => String(b.id).localeCompare(String(a.id)))[0] || null;
+  if (!latest) {
+    return { ...candidate, applications, currentStage: null, currentStageLabel: 'No application' };
+  }
+  const requirement = latest.requirement || null;
+  return {
+    ...candidate,
+    applications,
+    currentStage: latest.stage,
+    currentStageLabel: stageLabel(latest.stage),
+    owner: applicationOwner(latest, requirement),
+    nextAction: applicationNextAction(latest),
+    dueDate: applicationDueDate(latest),
+    overdue: applicationIsOverdue(latest),
+    matchScore: latest.matchScore ?? latest.resumeScore ?? null,
+    lifeStatus: applicationLifeStatus(latest),
+    aiInterviewStatus: latest.aiInterviewStatus || 'Required',
+    latestApplicationId: latest.id,
+  };
+}
+
 router.get('/', async (req, res) => {
   const candidates = await prisma.candidate.findMany({
-    include: { applications: { include: { requirement: { include: { client: true } } } } },
+    include: { applications: { include: { requirement: { include: { client: true, recruiter: true, bde: true } } } } },
     orderBy: { createdAt: 'desc' },
   });
-  res.json(candidates);
+
+  // A client never browses the candidate master — they only see people who
+  // have actually been put forward on their own requirements.
+  if (req.user.role === 'CLIENT') {
+    const scoped = candidates
+      .filter((c) => c.applications.some((a) => a.requirement && a.requirement.clientId === req.user.clientId))
+      .map((c) => decorate(c, { clientScoped: req.user.clientId }));
+    return res.json(scoped);
+  }
+  res.json(candidates.map((c) => decorate(c)));
 });
 
 // Must stay above /:id so "check-duplicate" isn't read as a candidate id.
@@ -44,15 +88,81 @@ router.get('/check-duplicate', async (req, res) => {
 router.get('/:id', async (req, res) => {
   const candidate = await prisma.candidate.findUnique({
     where: { id: req.params.id },
-    include: { applications: { include: { requirement: { include: { client: true } } } } },
+    include: { applications: { include: { requirement: { include: { client: true, recruiter: true, bde: true } } } } },
   });
   if (!candidate) return res.status(404).json({ error: 'Candidate not found' });
-  res.json(candidate);
+
+  const clientScoped = req.user.role === 'CLIENT' ? req.user.clientId : null;
+  const decorated = decorate(candidate, { clientScoped });
+  if (clientScoped && decorated.applications.length === 0) {
+    return res.status(403).json({ error: 'This record is outside your client scope' });
+  }
+
+  // "Matching Requirements" tab: open requirements this candidate is not
+  // already in the pipeline for, down to 50% (prototype candidateDetail).
+  const linked = new Set(decorated.applications.map((a) => a.requirementId));
+  const open = await prisma.requirement.findMany({
+    where: { status: 'OPEN', ...(clientScoped ? { clientId: clientScoped } : {}) },
+    include: { client: true },
+  });
+  const matchingRequirements = open
+    .filter((r) => !linked.has(r.id))
+    .map((r) => ({ ...r, match: computeMatch(candidate, r) }))
+    .filter((r) => r.match.overall >= 50)
+    .sort((a, b) => b.match.overall - a.match.overall);
+
+  // Per-application Owner / Next Action / Due Date for the Applications tab.
+  const applications = decorated.applications.map((a) => ({
+    ...a,
+    stageLabel: stageLabel(a.stage),
+    owner: applicationOwner(a, a.requirement),
+    nextAction: applicationNextAction(a),
+    dueDate: applicationDueDate(a),
+    overdue: applicationIsOverdue(a),
+    lifeStatus: applicationLifeStatus(a),
+  }));
+
+  res.json({ ...decorated, applications, matchingRequirements });
 });
 
+// Every field the prototype's acCollectCandidate() (line 8250) gathers, in the
+// section order of the Add Candidate modal: A Personal, B Professional,
+// C Education, D Skills, E Resume, F Source.
+const CANDIDATE_FIELDS = {
+  text: [
+    'name', 'email', 'phone', 'dob', 'gender', 'location', 'preferredLocation',
+    'currentCompany', 'currentDesignation', 'currentSalary', 'expectedSalary',
+    'noticePeriod', 'availability', 'jobPreference', 'preferredEmploymentType', 'preferredWorkMode',
+    'education', 'specialization', 'institute', 'passingYear',
+    'skills', 'goodToHaveSkills', 'technicalSkills', 'softSkills',
+    'resumeName', 'source', 'firstSource', 'sourceCampaign', 'profileStatus',
+  ],
+  numeric: ['experienceYears', 'relevantExperienceYears', 'resumeScore'],
+};
+
+function pickCandidate(body) {
+  const data = {};
+  for (const key of CANDIDATE_FIELDS.text) {
+    if (body[key] !== undefined) data[key] = body[key];
+  }
+  for (const key of CANDIDATE_FIELDS.numeric) {
+    if (body[key] !== undefined && body[key] !== '' && body[key] !== null) data[key] = Number(body[key]);
+  }
+  // A candidate arriving from a second source updates their latest source; the
+  // first source is recorded once and never overwritten.
+  if (data.source && !data.firstSource) data.firstSource = data.source;
+  if (data.source && !data.preferredLocation && data.location) data.preferredLocation = data.location;
+  return data;
+}
+
 router.post('/', requireRole(...RECRUITING_ROLES), async (req, res) => {
-  const { name, email, phone, source, skills, experienceYears, allowDuplicate } = req.body;
-  if (!name) return res.status(400).json({ error: 'name is required' });
+  const { email, phone, allowDuplicate } = req.body;
+  const data = pickCandidate(req.body);
+  // Prototype saveNewCandidate() (line 8304) required fields, in its order.
+  if (!data.name) return res.status(400).json({ error: 'First name is required.' });
+  if (!phone) return res.status(400).json({ error: 'Mobile is required.' });
+  if (!email) return res.status(400).json({ error: 'Email is required.' });
+  if (!String(data.skills || '').trim()) return res.status(400).json({ error: 'Enter at least one mandatory skill.' });
 
   // Warn (409) rather than silently creating a second record for the same
   // person — the caller re-sends with allowDuplicate to go ahead anyway.
@@ -67,19 +177,39 @@ router.post('/', requireRole(...RECRUITING_ROLES), async (req, res) => {
     }
   }
 
-  const candidate = await prisma.candidate.create({
-    data: { name, email, phone, source, skills, experienceYears: experienceYears != null && experienceYears !== '' ? Number(experienceYears) : undefined },
-  });
-  await logAudit({ userId: req.user.id, action: 'Candidate created', entity: 'Candidate', entityId: candidate.id });
-  res.status(201).json(candidate);
+  const candidate = await prisma.candidate.create({ data });
+  await logAudit({ userId: req.user.id, action: 'Candidate created (manual)', entity: 'Candidate', entityId: candidate.id, toValue: 'Active' });
+
+  // "Apply to Requirement" on the Add Candidate form creates the application in
+  // the same save, scored against that requirement — prototype saveNewCandidate().
+  let application = null;
+  if (req.body.requirementId) {
+    const requirement = await prisma.requirement.findUnique({ where: { id: req.body.requirementId } });
+    if (requirement) {
+      const match = computeMatch(candidate, requirement);
+      application = await prisma.application.create({
+        data: {
+          candidateId: candidate.id,
+          requirementId: requirement.id,
+          stage: 'NEW',
+          matchScore: match.overall,
+          resumeScore: candidate.resumeScore ?? null,
+          source: candidate.source,
+          firstSource: candidate.firstSource,
+          sourceCampaign: candidate.sourceCampaign,
+          applicationMethod: req.body.applicationMethod || 'Manual',
+          aiInterviewStatus: 'Required',
+        },
+      });
+      await logAudit({ userId: req.user.id, action: 'Application created (manual add)', entity: 'Application', entityId: application.id, toValue: 'New' });
+    }
+  }
+
+  res.status(201).json({ ...candidate, application });
 });
 
 router.put('/:id', requireRole(...RECRUITING_ROLES), async (req, res) => {
-  const { name, email, phone, source, skills, experienceYears } = req.body;
-  const candidate = await prisma.candidate.update({
-    where: { id: req.params.id },
-    data: { name, email, phone, source, skills, experienceYears: experienceYears != null && experienceYears !== '' ? Number(experienceYears) : undefined },
-  });
+  const candidate = await prisma.candidate.update({ where: { id: req.params.id }, data: pickCandidate(req.body) });
   await logAudit({ userId: req.user.id, action: 'Candidate updated', entity: 'Candidate', entityId: candidate.id });
   res.json(candidate);
 });

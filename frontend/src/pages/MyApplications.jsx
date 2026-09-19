@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { stageLabel } from '../atsVocab';
 
 // Candidate portal — someone who applied through /careers checks where their
 // applications got to, using the email they applied with. No account, matching
@@ -67,7 +68,7 @@ export default function MyApplications() {
                     <tr key={a.id}>
                       <td>{a.jobTitle}</td>
                       <td>{a.client}{a.location ? ` · ${a.location}` : ''}</td>
-                      <td><span className="status">{a.stage.replace(/_/g, ' ')}</span></td>
+                      <td><span className="status">{stageLabel(a.stage)}</span></td>
                       <td>{new Date(a.updatedAt).toLocaleDateString()}</td>
                     </tr>
                   ))}

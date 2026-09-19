@@ -2,7 +2,7 @@ const express = require('express');
 const prisma = require('../db');
 const { requireAuth, requireRole, isDeptScopedRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
-const { MATCH_THRESHOLD, rankCandidates } = require('../utils/matching');
+const { MATCH_THRESHOLD, SUGGESTION_THRESHOLD, rankCandidates } = require('../utils/matching');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -48,7 +48,19 @@ router.get('/:id', async (req, res) => {
   if (req.user.role === 'CLIENT' && requirement.clientId !== req.user.clientId) {
     return res.status(403).json({ error: 'This record is outside your client scope' });
   }
-  res.json(requirement);
+
+  // Openings / Filled / Remaining, and the count of candidates at or above the
+  // 70% match threshold — the prototype's reqFilled(), reqRemaining() and
+  // matchingCandidateCount() on the requirement detail screen.
+  const filled = requirement.applications.filter((a) => ['JOINED', 'HIRED'].includes(a.stage)).length;
+  const candidates = await prisma.candidate.findMany();
+  res.json({
+    ...requirement,
+    filled,
+    remaining: Math.max(0, (requirement.openings || 1) - filled),
+    matchingCandidates: rankCandidates(candidates, requirement, { threshold: MATCH_THRESHOLD }).length,
+    matchThreshold: MATCH_THRESHOLD,
+  });
 });
 
 // Suggested candidates for this requirement — everyone not already in the
@@ -63,38 +75,92 @@ router.get('/:id/matching-candidates', requireRole(...MATCHING_ROLES), async (re
     prisma.application.findMany({ where: { requirementId: requirement.id }, select: { candidateId: true } }),
   ]);
 
+  // The prototype's requirement detail lists suggestions down to 50%, while the
+  // "Matching Candidates" count tile only counts those at or above 70%.
   const ranked = rankCandidates(candidates, requirement, {
     excludeIds: new Set(linked.map((a) => a.candidateId)),
-    threshold: req.query.threshold ? Number(req.query.threshold) : MATCH_THRESHOLD,
+    threshold: req.query.threshold ? Number(req.query.threshold) : SUGGESTION_THRESHOLD,
   });
   res.json(ranked);
 });
 
+// Every field the prototype's collectRequirementForm() (line 7062) gathers.
+// Section letters match the prototype's Create Requirement modal headings:
+// A Basic Information, B Client Information, C Job Description,
+// D Job Conditions, E Compensation, F Assignment, G Job Posting.
+const REQUIREMENT_FIELDS = [
+  'title', 'description', 'department', 'priority', 'openings', 'closingDate', 'internal',
+  'jobDescription', 'responsibilities', 'qualifications', 'education', 'skills', 'goodToHaveSkills',
+  'employmentType', 'workMode', 'location', 'preferredLocation', 'experience', 'relevantExperience',
+  'joiningTimeline', 'noticePeriodMax', 'jobPreference',
+  'salaryType', 'currency', 'salary',
+  'recruiterId', 'bdeId', 'tl', 'stl', 'postingSources',
+];
+
+function pickRequirement(body) {
+  const data = {};
+  for (const key of REQUIREMENT_FIELDS) {
+    if (body[key] === undefined) continue;
+    if (key === 'openings') data.openings = Number(body.openings) || 1;
+    else if (key === 'internal') data.internal = Boolean(body.internal);
+    else data[key] = body[key];
+  }
+  return data;
+}
+
 router.post('/', requireRole(...RAISE_ROLES), async (req, res) => {
-  const { title, description, clientId, department, priority, skills, experience, openings, status, recruiterId, bdeId } = req.body;
-  if (!title || !clientId) return res.status(400).json({ error: 'title and clientId are required' });
+  const { clientId, status } = req.body;
+  const data = pickRequirement(req.body);
+  // Prototype saveNewRequirement(): title, full job description and at least
+  // one mandatory skill are required unless the requirement is saved as Draft.
+  if (!data.title) return res.status(400).json({ error: 'Enter a job title.' });
+  const asDraft = status === 'DRAFT';
+  if (!asDraft) {
+    if (!data.jobDescription && !data.description) return res.status(400).json({ error: 'Enter a job description.' });
+    if (!String(data.skills || '').trim()) return res.status(400).json({ error: 'Enter at least one mandatory skill.' });
+  }
+
+  // An internal requirement carries no client; a client requirement must name one.
+  if (!data.internal && !clientId) return res.status(400).json({ error: 'Select a client for a client requirement.' });
+
+  // The agreement gate: a client requirement only opens once the agreement is
+  // Active (prototype saveNewRequirement / activateRequirement).
+  let requirementStatus = 'DRAFT';
+  if (!asDraft) {
+    if (data.internal) requirementStatus = 'OPEN';
+    else {
+      const client = await prisma.client.findUnique({ where: { id: clientId } });
+      if (!client) return res.status(400).json({ error: 'Select a client for a client requirement.' });
+      if (client.agreementStatus !== 'ACTIVE') {
+        return res.status(400).json({
+          error: 'Cannot activate or post — the client agreement is not Active yet. Save as Draft instead.',
+        });
+      }
+      requirementStatus = 'OPEN';
+    }
+  }
+
   const requirement = await prisma.requirement.create({
     data: {
-      title, description, clientId, department, priority: priority || 'MEDIUM',
-      skills, experience, openings: openings != null ? Number(openings) : undefined,
-      status: status === 'DRAFT' ? 'DRAFT' : undefined,
-      recruiterId, bdeId,
+      ...data,
+      clientId,
+      priority: data.priority || 'Medium',
+      status: requirementStatus,
+      description: data.description || data.jobDescription || data.title,
     },
   });
-  await logAudit({ userId: req.user.id, action: 'Requirement created', entity: 'Requirement', entityId: requirement.id });
+  await logAudit({
+    userId: req.user.id, action: 'Requirement created', entity: 'Requirement',
+    entityId: requirement.id, toValue: requirementStatus,
+  });
   res.status(201).json(requirement);
 });
 
 router.put('/:id', requireRole(...RAISE_ROLES), async (req, res) => {
-  const { title, description, department, priority, status, skills, experience, openings, recruiterId, bdeId } = req.body;
-  const requirement = await prisma.requirement.update({
-    where: { id: req.params.id },
-    data: {
-      title, description, department, priority, status, skills, experience,
-      openings: openings != null ? Number(openings) : undefined,
-      recruiterId, bdeId,
-    },
-  });
+  const data = pickRequirement(req.body);
+  // status only moves through /activate and /toggle-status, which enforce the
+  // agreement gate — it is deliberately not editable here.
+  const requirement = await prisma.requirement.update({ where: { id: req.params.id }, data });
   await logAudit({ userId: req.user.id, action: 'Requirement updated', entity: 'Requirement', entityId: requirement.id });
   res.json(requirement);
 });
@@ -105,8 +171,11 @@ router.post('/:id/activate', requireRole(...RAISE_ROLES), async (req, res) => {
   const existing = await prisma.requirement.findUnique({ where: { id: req.params.id }, include: { client: true } });
   if (!existing) return res.status(404).json({ error: 'Requirement not found' });
   if (existing.status === 'OPEN') return res.status(400).json({ error: 'This requirement is already open' });
-  if (existing.client.agreementStatus !== 'SIGNED') {
-    return res.status(400).json({ error: "Cannot activate — this client's service agreement isn't signed yet" });
+  // Prototype activateRequirement() (line 6333): the gate is an ACTIVE
+  // agreement, not merely a signed/confirmed one. Internal requirements have
+  // no client agreement to wait on.
+  if (!existing.internal && (!existing.client || existing.client.agreementStatus !== 'ACTIVE')) {
+    return res.status(400).json({ error: 'Cannot activate — the client agreement is not yet Active.' });
   }
 
   const requirement = await prisma.requirement.update({ where: { id: req.params.id }, data: { status: 'OPEN' } });
@@ -137,36 +206,51 @@ router.post('/:id/generate-jd', requireRole(...RAISE_ROLES), async (req, res) =>
   const requirement = await prisma.requirement.findUnique({ where: { id: req.params.id }, include: { client: true } });
   if (!requirement) return res.status(404).json({ error: 'Requirement not found' });
 
-  const skills = String(requirement.skills || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // The prototype's jobDescriptionHtml() (line 6398): the JD is assembled from
+  // the requirement's own recorded fields, in this section order, rather than
+  // from boilerplate. Rendered as plain text so it can be stored in SQLite and
+  // served by the public job portal.
+  const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const skills = list(requirement.skills);
+  const goodToHave = list(requirement.goodToHaveSkills);
+  const row = (k, v) => (v ? `${k}: ${v}` : null);
 
   const description = [
-    `${requirement.title} — ${requirement.client.name}`,
+    requirement.title,
+    `${requirement.internal ? 'Internal TeamLink hiring' : requirement.client ? requirement.client.name : '—'} · ` +
+      `${requirement.location || '—'} · ${requirement.workMode || '—'}`,
     '',
-    `Department: ${requirement.department || 'General'}`,
-    `Location: ${requirement.client.location || 'To be discussed'}`,
-    `Experience: ${requirement.experience || 'As per role'}`,
-    `Openings: ${requirement.openings}`,
+    'About the role',
+    requirement.jobDescription || requirement.description || 'No description recorded yet.',
+    ...(requirement.responsibilities ? ['', 'Responsibilities', requirement.responsibilities] : []),
+    ...(requirement.qualifications ? ['', 'Qualifications', requirement.qualifications] : []),
     '',
-    'Role Overview',
-    `TeamLink Consultants is hiring a ${requirement.title} on behalf of ${requirement.client.name}` +
-      `${requirement.client.industry ? ` (${requirement.client.industry} sector)` : ''}. This is a full-time` +
-      ' position with scope to own delivery end to end.',
+    'Skills',
+    `${skills.join(', ') || '—'} (mandatory)`,
+    `${goodToHave.join(', ') || '—'} (good to have)`,
     '',
-    'Key Responsibilities',
-    '- Own end-to-end delivery within your area of expertise',
-    '- Work with cross-functional stakeholders to ship on committed timelines',
-    '- Uphold the quality, documentation and process standards of the team',
-    '',
-    'What We Are Looking For',
-    ...(skills.length ? skills.map((s) => `- Hands-on experience with ${s}`) : ['- Relevant hands-on experience for the role above']),
-    '- Strong written and verbal communication',
-    '- Ownership and a bias towards getting things done',
-    '',
-    'How To Apply',
-    'Apply through the TeamLink careers portal — our recruitment team will get back to shortlisted applicants.',
+    'Details',
+    ...[
+      row('Experience', requirement.experience),
+      row('Relevant experience', requirement.relevantExperience),
+      row('Education', requirement.education),
+      row('Location', requirement.location),
+      row('Preferred location', requirement.preferredLocation),
+      row('Work mode', requirement.workMode),
+      row('Employment type', requirement.employmentType),
+      row('Salary range', requirement.salary),
+      row('Notice period', requirement.noticePeriodMax),
+      row('Joining timeline', requirement.joiningTimeline),
+      row('Openings', requirement.openings),
+      row('Closing date', requirement.closingDate),
+    ].filter(Boolean),
+    ...(!requirement.internal && requirement.client
+      ? [
+          '',
+          'About the client',
+          [requirement.client.name, requirement.client.industry, requirement.client.location].filter(Boolean).join(' · '),
+        ]
+      : []),
   ].join('\n');
 
   const updated = await prisma.requirement.update({ where: { id: requirement.id }, data: { description } });

@@ -1,8 +1,10 @@
 const express = require('express');
 const prisma = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
 const { notifyUsers } = require('../utils/notify');
+const { computeMatch } = require('../utils/matching');
+const { stageLabel, STAGE_OWNER_ACTION } = require('../utils/atsVocab');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -11,6 +13,8 @@ router.use(requireAuth);
 // The three AI_INTERVIEW_* stages sit between NEW and RECRUITER_REVIEW: a
 // recruiter flags that an AI screening interview is needed, schedules it, then
 // records it as completed before the human review starts.
+// The 20 keys and their order match STAGE_CODES + EXTRA_STAGE_CODES in
+// backend/src/utils/atsVocab.js. Labels are never derived from these codes.
 const STAGE_OWNERS = {
   NEW: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
   AI_INTERVIEW_REQUIRED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
@@ -34,6 +38,58 @@ const STAGE_OWNERS = {
   HOLD: ['RECRUITER', 'BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
 };
 
+// yyyy-mm-dd plus n days.
+function offsetDate(from, days) {
+  const d = from ? new Date(from) : new Date();
+  if (Number.isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function raiseJoiningInvoice({ application, existing, userId }) {
+  const requirement = existing.requirement;
+  const client = requirement && requirement.client;
+  if (!client) return null;
+
+  const already = await prisma.invoice.findFirst({
+    where: { candidateId: existing.candidateId, requirementId: existing.requirementId },
+  });
+  if (already) return already;
+
+  // Fee % comes from the agreement. Falls back to the annual CTC band on the
+  // requirement when no offered CTC was recorded — never to a random number.
+  const feePercent = client.agreementFeePercent != null ? client.agreementFeePercent : 8.33;
+  const bandLakhs = Number(String(requirement.salary || '').match(/(\d+(?:\.\d+)?)/)?.[1]) || 12;
+  const ctc = Number(application.offeredCtc) > 0 ? Number(application.offeredCtc) : bandLakhs * 100000;
+  const amount = Math.round((ctc * feePercent) / 100);
+  const gst = Math.round(amount * ((client.gstPercent != null ? client.gstPercent : 18) / 100));
+  const tds = Math.round(amount * ((client.tdsPercent != null ? client.tdsPercent : 10) / 100));
+
+  const joiningDate = application.joiningDate || new Date().toISOString().slice(0, 10);
+  const invoice = await prisma.invoice.create({
+    data: {
+      clientId: client.id,
+      candidateId: existing.candidateId,
+      requirementId: existing.requirementId,
+      amount,
+      gst,
+      tds,
+      status: 'Pending',
+      joiningDate,
+      invoiceDate: offsetDate(joiningDate, 6),
+      dueDate: offsetDate(joiningDate, 12),
+      feePercent,
+      offeredCtc: ctc,
+      paymentTerms: client.paymentTerms || 'Invoice 6 days after joining; payment due within 6 days of invoice',
+    },
+  });
+  await logAudit({
+    userId, action: 'Invoice generated from ATS (Client Joining)', entity: 'Invoice',
+    entityId: invoice.id, toValue: 'Pending',
+  });
+  return invoice;
+}
+
 router.get('/', async (req, res) => {
   const where = {};
   if (req.query.requirementId) where.requirementId = req.query.requirementId;
@@ -47,11 +103,41 @@ router.get('/', async (req, res) => {
   res.json(applications);
 });
 
-router.post('/', async (req, res) => {
+// Adding someone to a pipeline is a recruiting action — the prototype gates it
+// on the "candidates: create" permission, so a CLIENT or EMPLOYEE cannot do it.
+const PIPELINE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'RECRUITER', 'BDE', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'];
+
+router.post('/', requireRole(...PIPELINE_ROLES), async (req, res) => {
   const { candidateId, requirementId } = req.body;
   if (!candidateId || !requirementId) return res.status(400).json({ error: 'candidateId and requirementId are required' });
-  const application = await prisma.application.create({ data: { candidateId, requirementId } });
-  await logAudit({ userId: req.user.id, action: 'Application created', entity: 'Application', entityId: application.id });
+
+  const existing = await prisma.application.findUnique({
+    where: { candidateId_requirementId: { candidateId, requirementId } },
+  });
+  if (existing) return res.status(409).json({ error: 'This candidate is already in the pipeline for this requirement.' });
+
+  // The match score is frozen onto the application at the moment the candidate
+  // enters the pipeline — the prototype's addCandidateToRequirement().
+  const [candidate, requirement] = await Promise.all([
+    prisma.candidate.findUnique({ where: { id: candidateId } }),
+    prisma.requirement.findUnique({ where: { id: requirementId } }),
+  ]);
+  if (!candidate || !requirement) return res.status(404).json({ error: 'Candidate or requirement not found' });
+  const match = computeMatch(candidate, requirement);
+
+  const application = await prisma.application.create({
+    data: {
+      candidateId,
+      requirementId,
+      stage: 'NEW',
+      matchScore: match.overall,
+      resumeScore: candidate.resumeScore ?? null,
+      source: 'ATS Match',
+      applicationMethod: 'Manual',
+      aiInterviewStatus: 'Required',
+    },
+  });
+  await logAudit({ userId: req.user.id, action: 'Candidate added to pipeline', entity: 'Application', entityId: application.id, toValue: 'New' });
   res.status(201).json(application);
 });
 
@@ -78,8 +164,19 @@ router.patch('/:id/stage', async (req, res) => {
       stage,
       interviewStatus: stage === 'INTERVIEW_SCHEDULED' ? 'SCHEDULED' : stage === 'INTERVIEW_COMPLETED' ? 'COMPLETED' : existing.interviewStatus,
       interviewAt: interviewAt ? new Date(interviewAt) : existing.interviewAt,
+      ...(req.body.offeredCtc != null && req.body.offeredCtc !== '' ? { offeredCtc: Number(req.body.offeredCtc) } : {}),
+      ...(req.body.joiningDate ? { joiningDate: req.body.joiningDate } : {}),
     },
   });
+
+  // ATS -> Accounts hand-off. Joining raises the placement invoice exactly
+  // once, keyed on candidate + requirement, and every figure comes from the
+  // client's agreed commercial terms — the prototype's confirmClientJoining()
+  // (line 9099): fee = CTC x agreed fee %, GST 18%, TDS at the client's rate,
+  // invoice 6 days after joining, payment due 6 days after that.
+  if (stage === 'JOINED') {
+    await raiseJoiningInvoice({ application, existing, userId: req.user.id });
+  }
 
   await logAudit({
     userId: req.user.id,
@@ -102,7 +199,7 @@ router.patch('/:id/stage', async (req, res) => {
     audience.push(...clientUsers.map((u) => u.id));
   }
   await notifyUsers(audience, {
-    title: `${existing.candidate.name} moved to ${stage.replace(/_/g, ' ')}`,
+    title: `${existing.candidate.name} moved to ${stageLabel(stage)}`,
     message: `${existing.requirement.title} — ${existing.requirement.client.name}`,
     exceptUserId: req.user.id,
   });
