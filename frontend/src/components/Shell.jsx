@@ -3,6 +3,10 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 
 const HR_MANAGE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+// Manager/Assistant Manager/STL/TL are themselves employees (with their own
+// profile to fill in) as well as team leads who manage their department's
+// employees — so they get the "My Profile" link that plain HR admins don't.
+const DEPT_SCOPED_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 const ATS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL', 'RECRUITER', 'BDE', 'CLIENT'];
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CLIENT'];
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
@@ -22,9 +26,10 @@ const HR_ITEMS = [
   { to: '/employee-services', label: 'Employee Services', icon: '🛎️' },
 ];
 
-// Employees get a direct link to their own fill-in-the-full-form profile
-// (distinct from the login-settings "Profile" under Account) — HR/managers
-// use Employee Management under Administration instead.
+// Employees (and Manager/Assistant Manager/STL/TL, who are employees too) get
+// a direct link to their own fill-in-the-full-form profile (distinct from the
+// login-settings "Profile" under Account) — plain HR admins use Employee
+// Management under Administration instead and don't need this link.
 const HR_ITEMS_EMPLOYEE = [
   { to: '/hrms', label: 'HRMS Dashboard', icon: '📊' },
   { to: '/my-profile', label: 'My Profile', icon: '🧑‍💼' },
@@ -37,10 +42,10 @@ const HR_ITEMS_EMPLOYEE = [
 
 function groupsForRole(role) {
   const groups = [];
-  if (HR_MANAGE_ROLES.includes(role)) {
-    groups.push({ label: 'HRMS', items: HR_ITEMS });
-  } else if (role === 'EMPLOYEE') {
+  if (DEPT_SCOPED_ROLES.includes(role) || role === 'EMPLOYEE') {
     groups.push({ label: 'HRMS', items: HR_ITEMS_EMPLOYEE });
+  } else if (HR_MANAGE_ROLES.includes(role)) {
+    groups.push({ label: 'HRMS', items: HR_ITEMS });
   }
   if (ATS_ROLES.includes(role)) {
     groups.push({

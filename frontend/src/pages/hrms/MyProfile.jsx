@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../../api';
+import { useAuth } from '../../context/AuthContext.jsx';
+
+const DEPT_SCOPED_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
 const emptyForm = {
   phone: '', email: '', dateOfBirth: '', gender: '', bloodGroup: '',
@@ -10,6 +14,8 @@ const emptyForm = {
 };
 
 export default function MyProfile() {
+  const { user } = useAuth();
+  const isTeamLead = DEPT_SCOPED_ROLES.includes(user?.role);
   const [employee, setEmployee] = useState(null);
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
@@ -17,6 +23,7 @@ export default function MyProfile() {
   const [message, setMessage] = useState('');
   const [unlockReason, setUnlockReason] = useState('');
   const [unlockMessage, setUnlockMessage] = useState('');
+  const [team, setTeam] = useState([]);
 
   function load() {
     api.get('/employees/me')
@@ -31,6 +38,11 @@ export default function MyProfile() {
       })
       .catch(() => setError('No employee record linked to this account.'));
     api.get('/employees/me/config').then((res) => setConfig(res.data));
+    if (isTeamLead) {
+      // Backend already scopes this to the caller's own department for
+      // Manager/Assistant Manager/STL/TL, so this is their team, not the company.
+      api.get('/employees').then((res) => setTeam(res.data)).catch(() => setTeam([]));
+    }
   }
   useEffect(load, []);
 
@@ -201,6 +213,32 @@ export default function MyProfile() {
         <div className="kv"><span className="k">Reporting Manager</span><span>{employee.reportingManager?.name || '—'}</span></div>
         <div className="kv"><span className="k">Joining Date</span><span>{employee.dateOfJoining ? new Date(employee.dateOfJoining).toLocaleDateString() : '—'}</span></div>
       </div>
+
+      {isTeamLead && (
+        <div className="card section">
+          <div className="page-head" style={{ marginBottom: 8 }}>
+            <h3 style={{ fontSize: 13 }}>My Department — {employee.department || 'Unassigned'}</h3>
+            <Link className="btn btn-sm" to="/employees">Open Employee Management</Link>
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Employee</th><th>Code</th><th>Designation</th><th>Status</th><th>Profile Stage</th></tr></thead>
+              <tbody>
+                {team.map((e) => (
+                  <tr key={e.id} className="row-link">
+                    <td><Link to={`/employees/${e.id}`}>{e.name}</Link></td>
+                    <td>{e.employeeCode}</td>
+                    <td>{e.designation || '—'}</td>
+                    <td><span className={`status ${e.employmentStatus === 'Active' ? 'priority-low' : ''}`}>{e.employmentStatus}</span></td>
+                    <td><span className={`status ${e.profileStage === 'Locked' ? 'priority-low' : e.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{e.profileStage === 'Locked' ? '🔒 Locked' : e.profileStage}</span></td>
+                  </tr>
+                ))}
+                {team.length === 0 && <tr><td colSpan="5" className="small-muted">No department employees yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
