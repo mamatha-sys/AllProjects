@@ -5,7 +5,7 @@ import api from '../api';
 export default function Requirements() {
   const [requirements, setRequirements] = useState([]);
   const [clients, setClients] = useState([]);
-  const [form, setForm] = useState({ title: '', clientId: '', department: '', priority: 'MEDIUM' });
+  const [form, setForm] = useState({ title: '', clientId: '', department: '', priority: 'MEDIUM', skills: '', experience: '', openings: 1 });
   const [showForm, setShowForm] = useState(false);
 
   function load() {
@@ -19,7 +19,7 @@ export default function Requirements() {
   async function createRequirement(e) {
     e.preventDefault();
     await api.post('/requirements', form);
-    setForm({ title: '', clientId: '', department: '', priority: 'MEDIUM' });
+    setForm({ title: '', clientId: '', department: '', priority: 'MEDIUM', skills: '', experience: '', openings: 1 });
     setShowForm(false);
     load();
   }
@@ -59,6 +59,22 @@ export default function Requirements() {
                 <option value="LOW">Low</option>
               </select>
             </label>
+            <label className="field">
+              <span>Must-have skills (comma-separated)</span>
+              <input
+                value={form.skills}
+                placeholder="Node.js, PostgreSQL, REST"
+                onChange={(e) => setForm({ ...form, skills: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>Experience (years)</span>
+              <input value={form.experience} placeholder="5-8" onChange={(e) => setForm({ ...form, experience: e.target.value })} />
+            </label>
+            <label className="field">
+              <span>Openings</span>
+              <input type="number" min="1" value={form.openings} onChange={(e) => setForm({ ...form, openings: e.target.value })} />
+            </label>
           </div>
           <button className="btn btn-primary btn-sm" type="submit">Save</button>
         </form>
@@ -67,7 +83,7 @@ export default function Requirements() {
       <div className="tbl-wrap">
         <table>
           <thead>
-            <tr><th>Title</th><th>Client</th><th>Priority</th><th>Status</th><th>Applications</th></tr>
+            <tr><th>Title</th><th>Client</th><th>Priority</th><th>Status</th><th>Applications</th><th>Matching candidates</th></tr>
           </thead>
           <tbody>
             {requirements.map((r) => (
@@ -77,9 +93,10 @@ export default function Requirements() {
                 <td><span className={`status priority-${r.priority.toLowerCase()}`}>{r.priority}</span></td>
                 <td>{r.status}</td>
                 <td>{r._count?.applications ?? 0}</td>
+                <td>{r.matchingCandidates ?? 0}</td>
               </tr>
             ))}
-            {requirements.length === 0 && <tr><td colSpan="5" className="small-muted">No requirements yet.</td></tr>}
+            {requirements.length === 0 && <tr><td colSpan="6" className="small-muted">No requirements yet.</td></tr>}
           </tbody>
         </table>
       </div>

@@ -44,6 +44,8 @@ import Profile from './pages/admin/Profile.jsx';
 
 import Careers from './pages/Careers.jsx';
 import JobDetail from './pages/JobDetail.jsx';
+import MyApplications from './pages/MyApplications.jsx';
+import AgreementSigning from './pages/AgreementSigning.jsx';
 
 export default function App() {
   return (
@@ -52,7 +54,11 @@ export default function App() {
 
       {/* Public Job Portal — no login required */}
       <Route path="/careers" element={<Careers />} />
+      <Route path="/careers/my-applications" element={<MyApplications />} />
       <Route path="/careers/:id" element={<JobDetail />} />
+
+      {/* Client-facing agreement signing link — no login, token is the key */}
+      <Route path="/agreement/:token" element={<AgreementSigning />} />
 
       <Route
         path="/"

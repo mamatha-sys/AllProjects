@@ -21,7 +21,10 @@ export default function Careers() {
         </div>
       </header>
       <main className="careers-content">
-        <h1>Open Positions</h1>
+        <div className="page-head">
+          <h1>Open Positions</h1>
+          <Link className="btn btn-sm" to="/careers/my-applications">Check my application status</Link>
+        </div>
         <p className="small-muted">Browse current openings across our client companies — no account needed to apply.</p>
         <div className="careers-list">
           {jobs.map((j) => (

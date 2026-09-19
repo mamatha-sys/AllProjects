@@ -1,6 +1,7 @@
 const express = require('express');
 const prisma = require('../db');
 const { logAudit } = require('../utils/audit');
+const { notifyUsers } = require('../utils/notify');
 
 const router = express.Router();
 
@@ -63,6 +64,108 @@ router.post('/jobs/:id/apply', async (req, res) => {
   await logAudit({ action: 'Job Portal application received', entity: 'Application', entityId: application.id, toValue: candidate.name });
 
   res.status(201).json({ message: 'Application submitted', applicationId: application.id });
+});
+
+// Candidate portal — where an applicant checks what happened to the
+// applications they submitted, keyed on the email they applied with (no
+// account, matching the no-login apply flow above). The prototype's
+// candidatePortalView()/myApplications().
+router.get('/my-applications', async (req, res) => {
+  const email = (req.query.email || '').trim();
+  if (!email) return res.status(400).json({ error: 'email is required' });
+
+  const candidate = await prisma.candidate.findFirst({
+    where: { email },
+    include: {
+      applications: {
+        include: { requirement: { include: { client: true } } },
+        orderBy: { updatedAt: 'desc' },
+      },
+    },
+  });
+  if (!candidate) return res.json({ name: null, applications: [] });
+
+  res.json({
+    name: candidate.name,
+    applications: candidate.applications.map((a) => ({
+      id: a.id,
+      jobTitle: a.requirement.title,
+      client: a.requirement.client.name,
+      location: a.requirement.client.location,
+      stage: a.stage,
+      interviewAt: a.interviewAt,
+      appliedAt: a.createdAt,
+      updatedAt: a.updatedAt,
+    })),
+  });
+});
+
+// ---- Client agreement signing link -----------------------------------------
+// The tokenised link a client receives (see POST /api/clients/:id/agreement/send).
+// It is deliberately outside the login wall so the signatory doesn't need a
+// TeamLink account — the opaque token is the only thing that grants access,
+// and it exposes nothing beyond that one client's own agreement.
+
+router.get('/agreement/:token', async (req, res) => {
+  const client = await prisma.client.findUnique({ where: { esignToken: req.params.token } });
+  if (!client || !client.agreementDocument) {
+    return res.status(404).json({ error: 'This signing link is not valid — ask TeamLink to resend it' });
+  }
+
+  // First open marks the agreement as viewed, as the prototype's e-sign portal does.
+  if (client.agreementStatus === 'SENT') {
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { agreementStatus: 'VIEWED', agreementViewedAt: new Date() },
+    });
+    await logAudit({ action: 'Agreement opened by client', entity: 'Client', entityId: client.id, fromValue: 'SENT', toValue: 'VIEWED' });
+  }
+
+  res.json({
+    clientName: client.name,
+    agreementId: client.agreementId,
+    document: client.agreementDocument,
+    status: client.agreementStatus === 'SENT' ? 'VIEWED' : client.agreementStatus,
+    signedAt: client.agreementSignedAt,
+    signedBy: client.agreementSignedBy,
+    signedByTitle: client.agreementSignedByTitle,
+  });
+});
+
+router.post('/agreement/:token/sign', async (req, res) => {
+  const { signedByName, signedByTitle } = req.body;
+  if (!signedByName) return res.status(400).json({ error: 'Type your full name to sign' });
+
+  const client = await prisma.client.findUnique({ where: { esignToken: req.params.token } });
+  if (!client || !client.agreementDocument) {
+    return res.status(404).json({ error: 'This signing link is not valid — ask TeamLink to resend it' });
+  }
+  if (client.agreementStatus === 'SIGNED') return res.status(409).json({ error: 'This agreement has already been signed' });
+  if (!['SENT', 'VIEWED'].includes(client.agreementStatus)) {
+    return res.status(400).json({ error: 'This agreement has not been sent for signature' });
+  }
+
+  const updated = await prisma.client.update({
+    where: { id: client.id },
+    data: {
+      agreementStatus: 'SIGNED',
+      agreementSignedAt: new Date(),
+      agreementSignedBy: signedByName,
+      agreementSignedByTitle: signedByTitle || null,
+    },
+  });
+  await logAudit({
+    action: 'Agreement e-signed via signing link', entity: 'Client',
+    entityId: client.id, fromValue: client.agreementStatus, toValue: 'SIGNED',
+  });
+
+  const owners = await prisma.requirement.findMany({ where: { clientId: client.id }, select: { recruiterId: true, bdeId: true } });
+  await notifyUsers(owners.flatMap((r) => [r.recruiterId, r.bdeId]), {
+    title: `${client.name} signed the service agreement`,
+    message: `${updated.agreementId || 'Agreement'} signed by ${signedByName}.`,
+  });
+
+  res.json({ message: 'Agreement signed', agreementId: updated.agreementId, signedAt: updated.agreementSignedAt });
 });
 
 module.exports = router;

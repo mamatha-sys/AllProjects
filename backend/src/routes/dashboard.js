@@ -7,10 +7,11 @@ router.use(requireAuth);
 
 router.get('/', async (req, res) => {
   const [
-    openRequirements, recruiterReview, withBde, clientReview, interviewsScheduled, hired, auditLog,
+    openRequirements, aiInterview, recruiterReview, withBde, clientReview, interviewsScheduled, hired, auditLog,
     activeEmployees, pendingLeave, invoicesPending, invoicesOverdue,
   ] = await Promise.all([
     prisma.requirement.count({ where: { status: 'OPEN' } }),
+    prisma.application.count({ where: { stage: { in: ['AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED', 'AI_INTERVIEW_COMPLETED'] } } }),
     prisma.application.count({ where: { stage: 'RECRUITER_REVIEW' } }),
     prisma.application.count({ where: { stage: 'WITH_BDE' } }),
     prisma.application.count({ where: { stage: { in: ['SHARED_WITH_CLIENT', 'CLIENT_REVIEW'] } } }),
@@ -25,6 +26,7 @@ router.get('/', async (req, res) => {
 
   res.json({
     openRequirements,
+    aiInterview,
     recruiterReview,
     withBde,
     clientReview,

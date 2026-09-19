@@ -17,6 +17,7 @@ export default function Dashboard() {
       </div>
       <div className="statbar">
         <Stat n={stats.openRequirements} l="Open requirements" />
+        <Stat n={stats.aiInterview} l="In AI interview" />
         <Stat n={stats.recruiterReview} l="Awaiting recruiter review" />
         <Stat n={stats.withBde} l="Awaiting BDE review" />
         <Stat n={stats.clientReview} l="With client" />

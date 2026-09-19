@@ -1,6 +1,6 @@
 # TeamLink.Enterprise
 
-A full-stack scaffold generated from the `teamlink-enterprise_3.html` prototype: React frontend, Node/Express backend, PostgreSQL database (via Prisma). Auth/roles plus the full ATS pipeline (Clients → Requirements → Candidates → Applications, through the 15-stage pipeline) are wired end-to-end as the template module — HRMS, Accounts, Admin and Reports follow the same pattern.
+A full-stack scaffold generated from the `teamlink-enterprise_3.html` prototype: React frontend, Node/Express backend, PostgreSQL database (via Prisma). Auth/roles plus the full ATS pipeline (Clients → Requirements → Candidates → Applications, through the 18-stage pipeline, including the AI Interview stages) are wired end-to-end as the template module — HRMS, Accounts, Admin and Reports follow the same pattern.
 
 ## Structure
 

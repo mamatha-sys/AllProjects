@@ -2,11 +2,15 @@ const express = require('express');
 const prisma = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
+const { notifyUsers } = require('../utils/notify');
 
 const router = express.Router();
 router.use(requireAuth);
 
 // Who is allowed to move an application INTO each stage. Admins/Super Admins always allowed.
+// The three AI_INTERVIEW_* stages sit between NEW and RECRUITER_REVIEW: a
+// recruiter flags that an AI screening interview is needed, schedules it, then
+// records it as completed before the human review starts.
 const STAGE_OWNERS = {
   NEW: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
   AI_INTERVIEW_REQUIRED: ['RECRUITER', 'TL', 'STL', 'MANAGER', 'ASSISTANT_MANAGER'],
@@ -62,7 +66,10 @@ router.patch('/:id/stage', async (req, res) => {
     return res.status(403).json({ error: "Moving to this stage isn't included in your role's permissions" });
   }
 
-  const existing = await prisma.application.findUnique({ where: { id: req.params.id } });
+  const existing = await prisma.application.findUnique({
+    where: { id: req.params.id },
+    include: { candidate: true, requirement: { include: { client: true } } },
+  });
   if (!existing) return res.status(404).json({ error: 'Application not found' });
 
   const application = await prisma.application.update({
@@ -81,6 +88,23 @@ router.patch('/:id/stage', async (req, res) => {
     entityId: application.id,
     fromValue: existing.stage,
     toValue: stage,
+  });
+
+  // Tell whoever owns this requirement that the pipeline moved — the
+  // prototype's pushNotification() on every stage transition. Stages the
+  // client acts on also notify that client's users.
+  const audience = [existing.requirement.recruiterId, existing.requirement.bdeId];
+  if (['SHARED_WITH_CLIENT', 'CLIENT_REVIEW'].includes(stage)) {
+    const clientUsers = await prisma.user.findMany({
+      where: { clientId: existing.requirement.clientId, role: 'CLIENT' },
+      select: { id: true },
+    });
+    audience.push(...clientUsers.map((u) => u.id));
+  }
+  await notifyUsers(audience, {
+    title: `${existing.candidate.name} moved to ${stage.replace(/_/g, ' ')}`,
+    message: `${existing.requirement.title} — ${existing.requirement.client.name}`,
+    exceptUserId: req.user.id,
   });
 
   res.json(application);

@@ -130,8 +130,23 @@ router.get('/notifications', async (req, res) => {
 });
 
 router.patch('/notifications/:id/read', async (req, res) => {
+  // Notifications are now pushed per-user from the ATS pipeline (see
+  // utils/notify.js), so only their owner may mark one read. userId null is a
+  // broadcast, readable by anyone.
+  const existing = await prisma.notification.findUnique({ where: { id: req.params.id } });
+  if (!existing || (existing.userId && existing.userId !== req.user.id)) {
+    return res.status(404).json({ error: 'Notification not found' });
+  }
   const notification = await prisma.notification.update({ where: { id: req.params.id }, data: { read: true } });
   res.json(notification);
+});
+
+router.post('/notifications/read-all', async (req, res) => {
+  await prisma.notification.updateMany({
+    where: { read: false, OR: [{ userId: req.user.id }, { userId: null }] },
+    data: { read: true },
+  });
+  res.json({ ok: true });
 });
 
 // ---- Audit logs ----
