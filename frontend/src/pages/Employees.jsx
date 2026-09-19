@@ -47,6 +47,12 @@ export default function Employees() {
     load();
   }
 
+  async function deleteEmployee(id, name) {
+    if (!confirm(`Permanently delete ${name}? This removes their attendance, leave, payslip and other records too. This can't be undone.`)) return;
+    await api.delete(`/employees/${id}`);
+    load();
+  }
+
   function parseCsv(text) {
     const lines = text.trim().split(/\r?\n/).filter(Boolean);
     if (!lines.length) return [];
@@ -161,14 +167,17 @@ export default function Employees() {
                 <td>{e.profileCompletionPct}%</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {isAdmin ? (
-                    !['Exited', 'Relieved'].includes(e.employmentStatus) && (
-                      <>
-                        <Link className="btn btn-sm" to={`/employees/${e.id}`}>Edit</Link>{' '}
-                        <button className="btn btn-sm" onClick={() => togglePause(e.id)}>{e.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>{' '}
-                        <button className="btn btn-sm" onClick={() => toggleLock(e.id)}>{e.isLocked ? 'Unlock' : 'Lock'}</button>{' '}
-                        <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>
-                      </>
-                    )
+                    <>
+                      {!['Exited', 'Relieved'].includes(e.employmentStatus) && (
+                        <>
+                          <Link className="btn btn-sm" to={`/employees/${e.id}`}>Edit</Link>{' '}
+                          <button className="btn btn-sm" onClick={() => togglePause(e.id)}>{e.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>{' '}
+                          <button className="btn btn-sm" onClick={() => toggleLock(e.id)}>{e.isLocked ? 'Unlock' : 'Lock'}</button>{' '}
+                          <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>{' '}
+                        </>
+                      )}
+                      <button className="btn btn-sm" onClick={() => deleteEmployee(e.id, e.name)}>Delete</button>
+                    </>
                   ) : (
                     <Link className="btn btn-sm" to={`/employees/${e.id}`}>View</Link>
                   )}

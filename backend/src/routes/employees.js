@@ -228,6 +228,31 @@ router.put('/:id', requireRole(...ADMIN_ROLES), async (req, res) => {
   res.json(withComputed(employee));
 });
 
+// Permanently removes an employee record and everything hanging off it
+// (attendance, leave, payslips, reviews, etc.) — Super Admin/Admin only.
+router.delete('/:id', requireRole(...ADMIN_ROLES), async (req, res) => {
+  const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Employee not found' });
+  await prisma.$transaction([
+    prisma.employee.updateMany({ where: { reportingManagerId: req.params.id }, data: { reportingManagerId: null } }),
+    prisma.employeeRecord.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.attendance.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.attendanceRegularization.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.leaveRequest.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.payslip.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.salaryStructure.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.fnfRequest.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.performanceReview.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.courseAssignment.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.projectAssignment.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.surveyResponse.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.acknowledgment.deleteMany({ where: { employeeId: req.params.id } }),
+    prisma.employee.delete({ where: { id: req.params.id } }),
+  ]);
+  await logAudit({ userId: req.user.id, action: 'Employee deleted', entity: 'Employee', entityId: req.params.id, fromValue: existing.name });
+  res.json({ ok: true });
+});
+
 // Links (or unlinks) this employee record to a login account — lets Administration
 // grant an employee self-service access without duplicating their profile data.
 router.put('/:id/link-user', requireRole(...ADMIN_ROLES), async (req, res) => {

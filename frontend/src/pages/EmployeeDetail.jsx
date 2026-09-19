@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -15,6 +15,7 @@ const EDIT_FIELDS = [
 
 export default function EmployeeDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isHR = HR_ROLES.includes(user?.role);
   const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
@@ -77,6 +78,12 @@ export default function EmployeeDetail() {
     load();
   }
 
+  async function deleteEmployee() {
+    if (!confirm(`Permanently delete ${employee.name}? This removes their attendance, leave, payslip and other records too. This can't be undone.`)) return;
+    await api.delete(`/employees/${id}`);
+    navigate('/employees');
+  }
+
   if (!employee) return <div className="small-muted">Loading…</div>;
 
   const onboardingDone = employee.onboardingTasks ? employee.onboardingTasks.filter((t) => t.completed).length : 0;
@@ -94,6 +101,7 @@ export default function EmployeeDetail() {
           {isAdmin && !editing && <button className="btn btn-sm" onClick={startEdit}>Edit</button>}
           {isAdmin && <button className="btn btn-sm" onClick={togglePause}>{employee.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>}
           {isAdmin && <button className="btn btn-sm" onClick={toggleLock}>{employee.isLocked ? 'Unlock' : 'Lock'}</button>}
+          {isAdmin && <button className="btn btn-sm" onClick={deleteEmployee}>Delete</button>}
         </div>
       </div>
 
