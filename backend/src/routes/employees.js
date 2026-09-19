@@ -207,10 +207,12 @@ router.post('/', requireRole(...HR_ROLES), async (req, res) => {
   res.status(201).json(withComputed(employee));
 });
 
-router.put('/:id', requireRole(...HR_ROLES), async (req, res) => {
+// Editing, pausing, locking/unlocking and transferring an employee are HR/Super
+// Admin actions — Manager/Assistant Manager/STL/TL get read-only visibility into
+// their own department (see the GET routes above), not the ability to change records.
+router.put('/:id', requireRole(...ADMIN_ROLES), async (req, res) => {
   const existingForScope = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existingForScope) return res.status(404).json({ error: 'Employee not found' });
-  if (!(await assertInScope(req, existingForScope))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const editableFields = [
     'name', 'email', 'phone', 'department', 'designation', 'location', 'employmentStatus', 'employeeType',
     'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'address', 'addressType',
@@ -220,7 +222,7 @@ router.put('/:id', requireRole(...HR_ROLES), async (req, res) => {
   ];
   const data = {};
   editableFields.forEach((f) => { if (req.body[f] !== undefined) data[f] = req.body[f]; });
-  if (DEPT_SCOPED_ROLES.includes(req.user.role)) delete data.department; // move departments only via /transfer, which keeps an audit trail
+  delete data.department; // move departments only via /transfer, which keeps an audit trail
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data });
   await logAudit({ userId: req.user.id, action: 'Employee updated', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(employee));
@@ -287,10 +289,9 @@ router.patch('/:id/unlock-request/reject', requireRole(...HR_ROLES), async (req,
 
 // Direct HR lock/unlock toggle — no request/reason needed, unlike the employee's
 // own unlock-request flow above. Used from the employee list's row actions.
-router.patch('/:id/toggle-lock', requireRole(...HR_ROLES), async (req, res) => {
+router.patch('/:id/toggle-lock', requireRole(...ADMIN_ROLES), async (req, res) => {
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
-  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const nextLocked = !existing.isLocked;
   const employee = await prisma.employee.update({
     where: { id: req.params.id },
@@ -302,10 +303,9 @@ router.patch('/:id/toggle-lock', requireRole(...HR_ROLES), async (req, res) => {
 
 // Pause/resume — toggles Active <-> On Probation, mirroring the reference app's
 // row-level Pause button (used e.g. to pause someone during a review).
-router.patch('/:id/toggle-pause', requireRole(...HR_ROLES), async (req, res) => {
+router.patch('/:id/toggle-pause', requireRole(...ADMIN_ROLES), async (req, res) => {
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
-  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const nextStatus = existing.employmentStatus === 'On Probation' ? 'Active' : 'On Probation';
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { employmentStatus: nextStatus } });
   await logAudit({ userId: req.user.id, action: 'Employee status toggled', entity: 'Employee', entityId: employee.id, fromValue: existing.employmentStatus, toValue: nextStatus });
@@ -313,12 +313,11 @@ router.patch('/:id/toggle-pause', requireRole(...HR_ROLES), async (req, res) => 
 });
 
 // Transfer an employee to a new department, keeping a note in the audit trail.
-router.post('/:id/transfer', requireRole(...HR_ROLES), async (req, res) => {
+router.post('/:id/transfer', requireRole(...ADMIN_ROLES), async (req, res) => {
   const { department, reason } = req.body;
   if (!department) return res.status(400).json({ error: 'department is required' });
   const existing = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!existing) return res.status(404).json({ error: 'Employee not found' });
-  if (!(await assertInScope(req, existing))) return res.status(403).json({ error: 'This record is outside your department scope' });
   const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { department } });
   await logAudit({ userId: req.user.id, action: 'Employee transferred' + (reason ? ` (${reason})` : ''), entity: 'Employee', entityId: employee.id, fromValue: existing.department, toValue: department });
   res.json(withComputed(employee));

@@ -91,9 +91,9 @@ export default function EmployeeDetail() {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className={`status ${employee.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(employee.employmentStatus) ? 'priority-high' : ''}`}>{employee.employmentStatus}</span>
           <span className={`status ${employee.profileStage === 'Locked' ? 'priority-low' : employee.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{employee.profileStage === 'Locked' ? '🔒 Locked' : employee.profileStage}</span>
-          {isHR && !editing && <button className="btn btn-sm" onClick={startEdit}>Edit</button>}
-          {isHR && <button className="btn btn-sm" onClick={togglePause}>{employee.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>}
-          {isHR && <button className="btn btn-sm" onClick={toggleLock}>{employee.isLocked ? 'Unlock' : 'Lock'}</button>}
+          {isAdmin && !editing && <button className="btn btn-sm" onClick={startEdit}>Edit</button>}
+          {isAdmin && <button className="btn btn-sm" onClick={togglePause}>{employee.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>}
+          {isAdmin && <button className="btn btn-sm" onClick={toggleLock}>{employee.isLocked ? 'Unlock' : 'Lock'}</button>}
         </div>
       </div>
 

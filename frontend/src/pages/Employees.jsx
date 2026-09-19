@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Employees() {
+  const { user } = useAuth();
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
   const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState({ employeeCode: '', name: '', email: '', department: '', designation: '', role: '', password: '' });
   const [showForm, setShowForm] = useState(false);
@@ -157,13 +160,17 @@ export default function Employees() {
                 <td><span className={`status ${e.profileStage === 'Locked' ? 'priority-low' : e.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{e.profileStage === 'Locked' ? '🔒 Locked' : e.profileStage}</span></td>
                 <td>{e.profileCompletionPct}%</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  {!['Exited', 'Relieved'].includes(e.employmentStatus) && (
-                    <>
-                      <Link className="btn btn-sm" to={`/employees/${e.id}`}>Edit</Link>{' '}
-                      <button className="btn btn-sm" onClick={() => togglePause(e.id)}>{e.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>{' '}
-                      <button className="btn btn-sm" onClick={() => toggleLock(e.id)}>{e.isLocked ? 'Unlock' : 'Lock'}</button>{' '}
-                      <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>
-                    </>
+                  {isAdmin ? (
+                    !['Exited', 'Relieved'].includes(e.employmentStatus) && (
+                      <>
+                        <Link className="btn btn-sm" to={`/employees/${e.id}`}>Edit</Link>{' '}
+                        <button className="btn btn-sm" onClick={() => togglePause(e.id)}>{e.employmentStatus === 'On Probation' ? 'Resume' : 'Pause'}</button>{' '}
+                        <button className="btn btn-sm" onClick={() => toggleLock(e.id)}>{e.isLocked ? 'Unlock' : 'Lock'}</button>{' '}
+                        <button className="btn btn-sm" onClick={() => transfer(e.id, e.department)}>Transfer</button>
+                      </>
+                    )
+                  ) : (
+                    <Link className="btn btn-sm" to={`/employees/${e.id}`}>View</Link>
                   )}
                 </td>
               </tr>
