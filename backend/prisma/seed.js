@@ -55,22 +55,39 @@ async function main() {
   await prisma.application.create({ data: { candidateId: cand3.id, requirementId: req2.id, stage: 'NEW' } });
 
   // HRMS
+  const ONBOARDING = ['Offer letter signed', 'ID proof collected', 'PAN card collected', 'Laptop/asset assigned', 'Reporting manager introduction', 'System access provisioned'];
+  const tasks = (doneCount) => JSON.stringify(ONBOARDING.map((task, i) => ({ task, completed: i < doneCount })));
+
   const empMeera = await prisma.employee.create({
     data: {
       userId: employeeUser.id, employeeCode: 'EMP-001', name: 'Meera Iyer', email: 'employee@teamlink.test',
       department: 'HR', designation: 'HR Executive', location: 'Hyderabad', dateOfJoining: new Date('2024-03-01'), employmentStatus: 'Active',
+      employeeType: 'Full-time', gender: 'Female', dateOfBirth: new Date('1996-04-12'),
+      emergencyContactName: 'Suresh Iyer', emergencyContactPhone: '9812345670', address: 'Banjara Hills, Hyderabad',
+      onboardingTasks: tasks(6),
     },
   });
   const empKiran = await prisma.employee.create({
     data: {
       userId: recruiter.id, employeeCode: 'EMP-002', name: 'Kiran Kumar', email: 'recruiter@teamlink.test',
       department: 'IT', designation: 'Recruiter', location: 'Hyderabad', dateOfJoining: new Date('2023-07-15'), employmentStatus: 'Active',
+      employeeType: 'Full-time', gender: 'Male', dateOfBirth: new Date('1994-11-02'),
+      onboardingTasks: tasks(6),
     },
   });
   const empDivya = await prisma.employee.create({
     data: {
       userId: tl.id, employeeCode: 'EMP-003', name: 'Divya Rao', email: 'tl@teamlink.test',
       department: 'IT', designation: 'Team Lead', location: 'Bengaluru', dateOfJoining: new Date('2022-01-10'), employmentStatus: 'Active',
+      employeeType: 'Full-time', gender: 'Female', dateOfBirth: new Date('1990-06-20'),
+      onboardingTasks: tasks(6),
+    },
+  });
+  const empNewJoiner = await prisma.employee.create({
+    data: {
+      employeeCode: 'EMP-004', name: 'Rahul Verma', department: 'IT', designation: 'Junior Developer',
+      location: 'Hyderabad', dateOfJoining: new Date(), employmentStatus: 'On Probation', employeeType: 'Full-time',
+      reportingManagerId: empDivya.id, onboardingTasks: tasks(3),
     },
   });
 
@@ -79,10 +96,36 @@ async function main() {
   await prisma.attendance.create({ data: { employeeId: empKiran.id, date: today, status: 'Late', checkIn: '10:20' } });
   await prisma.attendance.create({ data: { employeeId: empDivya.id, date: today, status: 'Present', checkIn: '09:00', checkOut: '18:30' } });
 
-  await prisma.leaveRequest.create({ data: { employeeId: empMeera.id, type: 'Casual', fromDate: '2026-09-25', toDate: '2026-09-26', reason: 'Family function', status: 'Pending' } });
-  await prisma.leaveRequest.create({ data: { employeeId: empKiran.id, type: 'Sick', fromDate: '2026-09-10', toDate: '2026-09-10', reason: 'Fever', status: 'Approved', decidedAt: new Date() } });
+  await prisma.leaveRequest.create({ data: { employeeId: empMeera.id, type: 'Casual Leave', fromDate: '2026-09-25', toDate: '2026-09-26', reason: 'Family function', status: 'Pending' } });
+  await prisma.leaveRequest.create({ data: { employeeId: empKiran.id, type: 'Sick Leave', fromDate: '2026-09-10', toDate: '2026-09-10', reason: 'Fever', status: 'Approved', decidedAt: new Date() } });
 
-  await prisma.payslip.create({ data: { employeeId: empDivya.id, month: '2026-08', basic: 50000, hra: 20000, allowances: 15000, deductions: 5000, netPay: 80000 } });
+  await prisma.attendanceRegularization.create({ data: { employeeId: empKiran.id, date: today, requestedCheckIn: '09:15', reason: 'Biometric device was offline at the gate.' } });
+
+  // Leave policy — types, approval reasons, holiday calendar
+  const LEAVE_TYPES = [
+    { code: 'CL', name: 'Casual Leave', cap: 12, unit: 'yr', carries: false },
+    { code: 'SL', name: 'Sick Leave', cap: 1, unit: 'month', carries: true },
+    { code: 'EL', name: 'Earned Leave', cap: 18, unit: 'yr', carries: false, active: false },
+    { code: 'ML', name: 'Maternity', cap: 182, unit: 'yr', carries: false, active: false },
+    { code: 'PL', name: 'Paternity', cap: 15, unit: 'yr', carries: false, active: false },
+    { code: 'LWP', name: 'Loss of Pay', cap: 0, unit: 'unpaid', carries: false, active: false },
+  ];
+  for (const t of LEAVE_TYPES) await prisma.leaveType.create({ data: t });
+
+  const LEAVE_REASONS = ['Medical Emergency', 'Family Function / Event', 'Personal Reasons', 'Approved per Company Policy', 'Other'];
+  for (const label of LEAVE_REASONS) await prisma.leaveReason.create({ data: { label } });
+
+  await prisma.holiday.create({ data: { name: 'Diwali', date: '2026-11-08' } });
+  await prisma.holiday.create({ data: { name: 'Republic Day', date: '2027-01-26' } });
+  await prisma.holiday.create({ data: { name: 'Independence Day', date: '2026-08-15' } });
+
+  // Salary structures (feed the payroll run)
+  await prisma.salaryStructure.create({ data: { employeeId: empDivya.id, payMode: 'Package', ctc: 1800000, basic: 75000, hra: 30000, bonus: 6250, specialAllowance: 38750, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 3608 } });
+  await prisma.salaryStructure.create({ data: { employeeId: empKiran.id, payMode: 'Package', ctc: 900000, basic: 37500, hra: 15000, bonus: 3125, specialAllowance: 15375, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 1804 } });
+  await prisma.salaryStructure.create({ data: { employeeId: empMeera.id, payMode: 'Package', ctc: 720000, basic: 30000, hra: 12000, bonus: 2500, specialAllowance: 11500, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 1443 } });
+  await prisma.salaryStructure.create({ data: { employeeId: empNewJoiner.id, payMode: 'Stipend', stipend: 25000 } });
+
+  await prisma.payslip.create({ data: { employeeId: empDivya.id, month: '2026-08', basic: 75000, hra: 30000, allowances: 45000, deductions: 2000, netPay: 148000, bonus: 6250, specialAllowance: 38750, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 3608, lopDays: 0 } });
 
   // Accounts
   const invoice1 = await prisma.invoice.create({

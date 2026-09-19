@@ -22,6 +22,7 @@ import Payroll from './pages/Payroll.jsx';
 import HrmsDashboard from './pages/hrms/HrmsDashboard.jsx';
 import PerformanceDevelopment from './pages/hrms/PerformanceDevelopment.jsx';
 import EmployeeServices from './pages/hrms/EmployeeServices.jsx';
+import MyProfile from './pages/hrms/MyProfile.jsx';
 
 import Invoices from './pages/Invoices.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="payroll" element={<Payroll />} />
         <Route path="performance" element={<PerformanceDevelopment />} />
         <Route path="employee-services" element={<EmployeeServices />} />
+        <Route path="my-profile" element={<MyProfile />} />
 
         {/* ATS */}
         <Route path="requirements" element={<Requirements />} />

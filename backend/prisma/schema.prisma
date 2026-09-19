@@ -123,22 +123,35 @@ model Employee {
   designation       String?
   location          String?
   dateOfJoining     DateTime?
-  employmentStatus  String   @default("Active") // Active | Notice Period | Exit Process | Relieved
+  employmentStatus  String   @default("Active") // Active | On Probation | Notice Period | Exit Process | Relieved | Exited
+  employeeType      String?  @default("Full-time") // Full-time | Contract | Intern
+  dateOfBirth       DateTime?
+  gender            String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  address           String?
+  onboardingTasks   String?  // JSON array of {task, completed}
+  offboardingStatus String?  // null | Serving Notice | Cleared
+  offboardingTasks  String?  // JSON array of {task, completed}
+  pendingChanges    String?  // JSON array of {field, from, to} awaiting HR approval
   reportingManagerId String?
   reportingManager    Employee?  @relation("ManagerReports", fields: [reportingManagerId], references: [id])
   directReports       Employee[] @relation("ManagerReports")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  attendance         Attendance[]
-  leaveRequests      LeaveRequest[]
-  payslips           Payslip[]
-  records            EmployeeRecord[]
-  performanceReviews PerformanceReview[]
-  courseAssignments  CourseAssignment[]
-  projectAssignments ProjectAssignment[]
-  surveyResponses    SurveyResponse[]
-  acknowledgments    Acknowledgment[]
+  attendance             Attendance[]
+  attendanceRegularizations AttendanceRegularization[]
+  leaveRequests          LeaveRequest[]
+  payslips               Payslip[]
+  records                EmployeeRecord[]
+  performanceReviews     PerformanceReview[]
+  courseAssignments      CourseAssignment[]
+  projectAssignments     ProjectAssignment[]
+  surveyResponses        SurveyResponse[]
+  acknowledgments        Acknowledgment[]
+  salaryStructure        SalaryStructure?
+  fnfRequests            FnfRequest[]
 }
 
 // Generic table backing the smaller, similarly-shaped HRMS self-service areas
@@ -173,6 +186,20 @@ model Attendance {
   @@unique([employeeId, date])
 }
 
+// A request to correct a punch after the fact (missing/incorrect check-in or check-out).
+model AttendanceRegularization {
+  id               String   @id @default(cuid())
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id])
+  date             String
+  requestedCheckIn String?
+  requestedCheckOut String?
+  reason           String?
+  status           String   @default("Pending") // Pending | Approved | Rejected
+  createdAt        DateTime @default(now())
+  decidedAt        DateTime?
+}
+
 model LeaveRequest {
   id         String   @id @default(cuid())
   employeeId String
@@ -186,6 +213,30 @@ model LeaveRequest {
   decidedAt  DateTime?
 }
 
+// Configurable leave policy — types, caps, and the reasons offered when approving.
+model LeaveType {
+  id      String  @id @default(cuid())
+  code    String  @unique
+  name    String
+  cap     Int     @default(0)
+  unit    String  @default("yr") // yr | month | unpaid
+  carries Boolean @default(false)
+  active  Boolean @default(true)
+}
+
+model LeaveReason {
+  id     String  @id @default(cuid())
+  label  String
+  active Boolean @default(true)
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  name      String
+  date      String
+  createdAt DateTime @default(now())
+}
+
 model Payslip {
   id         String   @id @default(cuid())
   employeeId String
@@ -196,9 +247,50 @@ model Payslip {
   allowances Float
   deductions Float
   netPay     Float
+  // Detailed breakup, mirroring the reference app's payslip components.
+  bonus            Float? @default(0)
+  specialAllowance Float? @default(0)
+  employerPf       Float? @default(0)
+  employeePf       Float? @default(0)
+  professionalTax  Float? @default(0)
+  gratuity         Float? @default(0)
+  lopDays          Float? @default(0) // loss-of-pay days deducted this cycle
   generatedAt DateTime @default(now())
 
   @@unique([employeeId, month])
+}
+
+// One employee's pay structure — either a flat Stipend, or a Package broken
+// into Basic/HRA/Bonus/Special Allowance with PF/PT deductions and employer
+// costs, matching the reference app's CTC breakup.
+model SalaryStructure {
+  id               String   @id @default(cuid())
+  employeeId       String   @unique
+  employee         Employee @relation(fields: [employeeId], references: [id])
+  payMode          String   @default("Package") // Package | Stipend
+  ctc              Float    @default(0)
+  stipend          Float    @default(0)
+  basic            Float    @default(0)
+  hra              Float    @default(0)
+  bonus            Float    @default(0)
+  specialAllowance Float    @default(0)
+  employerPf       Float    @default(0)
+  employeePf       Float    @default(0)
+  professionalTax  Float    @default(0)
+  gratuity         Float    @default(0)
+  updatedAt        DateTime @updatedAt
+}
+
+// Full & Final settlement request, raised when an employee's offboarding completes.
+model FnfRequest {
+  id               String   @id @default(cuid())
+  employeeId       String
+  employee         Employee @relation(fields: [employeeId], references: [id])
+  lastWorkingDate  String
+  status           String   @default("Pending") // Pending | Processed
+  settlementAmount Float?
+  createdAt        DateTime @default(now())
+  processedAt      DateTime?
 }
 
 // =============================================================================
@@ -363,6 +455,14 @@ model HrConfig {
   freeLateArrivalsPerMonth      Int    @default(2)
   freeEarlyLogoutsPerMonth      Int    @default(1)
   earliestExcusableEarlyLogout  String @default("17:00")
+  // Attendance policy
+  graceTimeMinutes              Int    @default(15)
+  halfDayHours                  Float  @default(4)
+  fullDayHours                  Float  @default(8)
+  // Payroll policy — how attendance turns into pay
+  unmarkedDaysUnpaid            Boolean @default(true)
+  weekendsPaid                  Boolean @default(true)
+  paidLeaveDaysPerMonth         Int    @default(1)
 }
 
 // =============================================================================
