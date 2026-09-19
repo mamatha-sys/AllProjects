@@ -13,6 +13,7 @@ import CandidateDetail from './pages/CandidateDetail.jsx';
 import Team from './pages/ats/Team.jsx';
 import InterviewCalendar from './pages/ats/InterviewCalendar.jsx';
 import Search from './pages/ats/Search.jsx';
+import AtsDashboard from './pages/ats/AtsDashboard.jsx';
 import AccountsDashboard from './pages/AccountsDashboard.jsx';
 
 import Employees from './pages/Employees.jsx';
@@ -95,10 +96,10 @@ export default function App() {
         <Route path="ats/team" element={<Team />} />
         <Route path="ats/calendar" element={<InterviewCalendar />} />
         <Route path="ats/search" element={<Search />} />
-        {/* The prototype's ATS sidebar opens on its own ATS dashboard screen,
-            which is not built here yet — the entry lands on the main dashboard,
-            which already carries the prototype's six ATS tiles. */}
-        <Route path="ats/dashboard" element={<Dashboard />} />
+        {/* The prototype's ATS sidebar opens on its own ATS dashboard screen
+            (atsDashboard, line 6252) — the role work strip, the six-cell stat
+            bar and Pipeline by stage — not the org-wide main dashboard. */}
+        <Route path="ats/dashboard" element={<AtsDashboard />} />
 
         {/* Accounts */}
         <Route path="invoices" element={<Invoices />} />

@@ -18,6 +18,24 @@ router.get('/', async (req, res) => {
   res.json(clients);
 });
 
+// The Add Client modal shows the agreement template filling in live from the
+// fields on the left (prototype refreshAgreementPreview(), line 7443). The
+// document is built by the same generator the real agreement uses, so the
+// preview and the saved document can never drift apart. Read-only.
+// Must stay above /:id so "preview-agreement" is not read as a client id.
+router.post('/preview-agreement', async (req, res) => {
+  const draft = req.body || {};
+  res.json({
+    document: buildAgreementDocument({
+      name: draft.name || '(company name)',
+      legalName: draft.legalName,
+      industry: draft.industry,
+      location: draft.location,
+      agreementFeePercent: draft.agreementFeePercent != null ? Number(draft.agreementFeePercent) : 8.33,
+    }),
+  });
+});
+
 router.get('/:id', async (req, res) => {
   const client = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!client) return res.status(404).json({ error: 'Client not found' });

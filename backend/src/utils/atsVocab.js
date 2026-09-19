@@ -320,7 +320,38 @@ function interviewStatusLabel(code) {
   return INTERVIEW_STATUS_LABELS[code] || code || '—';
 }
 
+// A candidate never sees the internal pipeline vocabulary — the prototype's
+// CANDIDATE_FACING_STAGE map (line 6642) collapses the eighteen internal
+// stages into the seven a candidate is shown on their own portal.
+const CANDIDATE_FACING_STAGE = {
+  NEW: 'Applied',
+  AI_INTERVIEW_REQUIRED: 'Under Review',
+  AI_INTERVIEW_SCHEDULED: 'Under Review',
+  AI_INTERVIEW_COMPLETED: 'Under Review',
+  RECRUITER_REVIEW: 'Under Review',
+  RECRUITER_APPROVED: 'Under Review',
+  WITH_BDE: 'Under Review',
+  BDE_APPROVED: 'Under Review',
+  SHARED_WITH_CLIENT: 'Client Review',
+  CLIENT_REVIEW: 'Client Review',
+  CLIENT_SHORTLISTED: 'Interview',
+  INTERVIEW_SCHEDULED: 'Interview',
+  INTERVIEW_COMPLETED: 'Interview',
+  SELECTED: 'Selected',
+  OFFER: 'Offer',
+  OFFER_ACCEPTED: 'Offer',
+  JOINED: 'Joined',
+  HIRED: 'Joined',
+  REJECTED: 'Rejected',
+  HOLD: 'On Hold',
+};
+function candidateFacingStage(stage) {
+  return CANDIDATE_FACING_STAGE[stage] || 'Under Review';
+}
+
 module.exports = {
+  CANDIDATE_FACING_STAGE,
+  candidateFacingStage,
   STAGE_CODES,
   EXTRA_STAGE_CODES,
   ALL_STAGE_CODES,

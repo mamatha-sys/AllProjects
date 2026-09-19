@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api';
-import { agreementStatusLabel, stageLabel, requirementStatusLabel } from '../atsVocab';
+import { agreementStatusLabel, requirementStatusLabel } from '../atsVocab';
+import { StatusBadge, KV, agreementBadgeClass, fmtDate } from './ats/atsUi';
 
 const AGREEMENT_EDIT_ROLES = ['SUPER_ADMIN', 'ADMIN'];
 
@@ -12,12 +13,6 @@ const SHARED_STAGES = [
   'SHARED_WITH_CLIENT', 'CLIENT_REVIEW', 'CLIENT_SHORTLISTED', 'INTERVIEW_SCHEDULED',
   'INTERVIEW_COMPLETED', 'SELECTED', 'OFFER', 'OFFER_ACCEPTED', 'JOINED', 'REJECTED',
 ];
-
-function priorityClass(priority) {
-  if (priority === 'Urgent' || priority === 'High') return 'priority-high';
-  if (priority === 'Medium') return 'priority-medium';
-  return 'priority-low';
-}
 
 export default function ClientDetail() {
   const { id } = useParams();
@@ -70,43 +65,51 @@ export default function ClientDetail() {
 
   return (
     <div>
+      <div className="breadcrumb">
+        <span className="bc-link" onClick={() => navigate('/clients')}>ATS</span>
+        <span className="bc-sep">/</span>
+        <span className="bc-link" onClick={() => navigate('/clients')}>Clients</span>
+        <span className="bc-sep">/</span>
+        <span className="bc-current">{client.name}</span>
+      </div>
       <Link className="small-muted" to="/clients">← Back to clients</Link>
       <div className="page-head" style={{ marginTop: 10 }}>
         <div>
-          <h1>{client.name}</h1>
+          <h1 style={{ fontSize: 20 }}>{client.name}</h1>
           <div className="page-sub">{[client.industry, client.location].filter(Boolean).join(' · ') || '—'}</div>
         </div>
-        <span className="status">{agreementStatusLabel(client.agreementStatus)}</span>
-      </div>
-      <div className="card">
-        <h3>Client details</h3>
-        <div className="kv">
-          <span className="k">Contact</span>
-          <span>{[client.contactName, client.contactEmail, client.contactPhone].filter(Boolean).join(' — ') || '—'}</span>
-        </div>
-        <div className="kv"><span className="k">Account Manager</span><span>{client.accountManager || '—'}</span></div>
-        <div className="kv"><span className="k">GST</span><span>{client.gst || '—'}</span></div>
-        <div className="kv"><span className="k">TDS</span><span>{client.tdsPercent != null ? `${client.tdsPercent}%` : '—'}</span></div>
-        <div className="kv"><span className="k">Payment Terms</span><span>{client.paymentTerms || '—'}</span></div>
-        <div className="kv"><span className="k">Agreement Date</span><span>{client.agreementActivatedAt ? new Date(client.agreementActivatedAt).toLocaleDateString() : '—'}</span></div>
-        <div className="kv"><span className="k">Agreement</span><span>{client.agreementId || 'Not raised yet'}</span></div>
-        <div className="kv"><span className="k">Placement fee</span><span>{client.agreementFeePercent ?? '—'}% of annual CTC</span></div>
-        {client.agreementSentAt && (
-          <div className="kv"><span className="k">Sent</span><span>{new Date(client.agreementSentAt).toLocaleString()}</span></div>
-        )}
-        {client.agreementSignedAt && (
-          <div className="kv">
-            <span className="k">Signed</span>
-            <span>
-              {client.agreementSignedBy}
-              {client.agreementSignedByTitle ? ` (${client.agreementSignedByTitle})` : ''} on{' '}
-              {new Date(client.agreementSignedAt).toLocaleDateString()}
-            </span>
-          </div>
-        )}
+        <span className={`status ${agreementBadgeClass(client.agreementStatus)}`}>
+          {agreementStatusLabel(client.agreementStatus)}
+        </span>
       </div>
 
-      {error && <div className="error-text">{error}</div>}
+      {error && <div className="notice red">{error}</div>}
+
+      <div className="two-col">
+      <div>
+      <div className="card section">
+        <h3 style={{ fontSize: 13, marginBottom: 10 }}>Client details</h3>
+        <div className="grid-2">
+          <KV k="Contact">
+            {[client.contactName, client.contactEmail, client.contactPhone].filter(Boolean).join(' — ') || '—'}
+          </KV>
+          <KV k="Account Manager">{client.accountManager || '—'}</KV>
+          <KV k="GST">{client.gst || '—'}</KV>
+          <KV k="TDS">{client.tdsPercent != null ? `${client.tdsPercent}%` : '—'}</KV>
+          <KV k="Payment Terms">{client.paymentTerms || '—'}</KV>
+          <KV k="Agreement Date">{fmtDate(client.agreementActivatedAt)}</KV>
+          <KV k="Agreement">{client.agreementId || 'Not raised yet'}</KV>
+          <KV k="Placement fee">{client.agreementFeePercent ?? '—'}% of annual CTC</KV>
+          {client.agreementSentAt && <KV k="Sent">{fmtDate(client.agreementSentAt)}</KV>}
+          {client.agreementSignedAt && (
+            <KV k="Signed">
+              {client.agreementSignedBy}
+              {client.agreementSignedByTitle ? ` (${client.agreementSignedByTitle})` : ''} on{' '}
+              {fmtDate(client.agreementSignedAt)}
+            </KV>
+          )}
+        </div>
+      </div>
 
       {canManage && (
         <div className="card section">
@@ -185,26 +188,28 @@ export default function ClientDetail() {
       )}
 
       <div className="card section">
-        <h3>Requirements ({requirements.length})</h3>
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Requirements ({requirements.length})</h3>
         <div className="tbl-wrap">
           <table>
             <thead><tr><th>Requirement</th><th>Openings</th><th>Status</th></tr></thead>
             <tbody>
               {requirements.map((r) => (
-                <tr key={r.id} className="row-link">
-                  <td><Link to={`/requirements/${r.id}`}>{r.title}</Link></td>
+                <tr key={r.id} className="row-link" onClick={() => navigate(`/requirements/${r.id}`)}>
+                  <td>{r.title}</td>
                   <td>{r.openings}</td>
-                  <td><span className={`status ${priorityClass(r.priority)}`}>{requirementStatusLabel(r.status)}</span></td>
+                  <td><span className="status active">{requirementStatusLabel(r.status)}</span></td>
                 </tr>
               ))}
-              {requirements.length === 0 && <tr><td colSpan="3" className="small-muted">No requirements yet.</td></tr>}
+              {requirements.length === 0 && (
+                <tr><td colSpan="3" className="small-muted" style={{ padding: 16 }}>No requirements yet.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div className="card section">
-        <h3>Candidates shared with this client</h3>
+      <div className="card">
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Candidates shared with this client</h3>
         <div className="tbl-wrap">
           <table>
             <thead><tr><th>Candidate</th><th>Requirement</th><th>Stage</th><th>Action</th></tr></thead>
@@ -213,25 +218,33 @@ export default function ClientDetail() {
                 <tr key={a.id}>
                   <td>{a.candidate?.name}</td>
                   <td>{a.requirement?.title}</td>
-                  <td><span className="status">{stageLabel(a.stage)}</span></td>
+                  <td><StatusBadge stage={a.stage} /></td>
                   <td><Link className="btn btn-sm" to={`/candidates/${a.candidateId}`}>View</Link></td>
                 </tr>
               ))}
-              {shared.length === 0 && <tr><td colSpan="4" className="small-muted">No candidates shared yet.</td></tr>}
+              {shared.length === 0 && (
+                <tr><td colSpan="4" className="small-muted" style={{ padding: 16 }}>No candidates shared yet.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+      </div>
 
-      <div className="card section">
-        <h3>Billing history</h3>
-        {invoices.map((i) => (
-          <div className="kv" key={i.id}>
-            <span className="k"><Link to={`/invoices/${i.id}`}>{i.id}</Link></span>
-            <span className={`status ${i.status === 'Overdue' ? 'priority-high' : i.status === 'Paid' ? 'priority-low' : ''}`}>{i.status}</span>
-          </div>
-        ))}
-        {invoices.length === 0 && <div className="small-muted">No invoices yet.</div>}
+      <div>
+        <div className="card">
+          <h3 style={{ fontSize: 13, marginBottom: 10 }}>Billing history</h3>
+          {invoices.map((i) => (
+            <div className="kv" key={i.id}>
+              <span className="k"><Link to={`/invoices/${i.id}`}>{i.invoiceNumber || i.id}</Link></span>
+              <span className={`status ${i.status === 'Overdue' ? 'rejected' : i.status === 'Paid' ? 'active' : 'pending'}`}>
+                {i.status}
+              </span>
+            </div>
+          ))}
+          {invoices.length === 0 && <div className="small-muted">No invoices yet.</div>}
+        </div>
+      </div>
       </div>
     </div>
   );

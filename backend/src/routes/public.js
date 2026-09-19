@@ -2,6 +2,8 @@ const express = require('express');
 const prisma = require('../db');
 const { logAudit } = require('../utils/audit');
 const { notifyUsers } = require('../utils/notify');
+const { candidateFacingStage } = require('../utils/atsVocab');
+const { computeMatch } = require('../utils/matching');
 
 const router = express.Router();
 
@@ -85,15 +87,62 @@ router.get('/my-applications', async (req, res) => {
   });
   if (!candidate) return res.json({ name: null, applications: [] });
 
+  // "Matching Jobs" on the portal: open roles at or above 60%, the prototype's
+  // candidatePortalView() threshold. Client commercial terms are never sent.
+  const open = await prisma.requirement.findMany({ where: { status: 'OPEN' } });
+  const applied = new Set(candidate.applications.map((a) => a.requirementId));
+  const matchingJobs = open
+    .filter((r) => !applied.has(r.id))
+    .map((r) => ({
+      id: r.id, title: r.title, location: r.location, experience: r.experience,
+      match: computeMatch(candidate, r).overall,
+    }))
+    .filter((r) => r.match >= 60)
+    .sort((a, b) => b.match - a.match);
+
   res.json({
     name: candidate.name,
+    // The candidate's own record, for the portal's Profile tab. Nothing
+    // internal (match scores, recruiter notes, client terms) is included.
+    profile: {
+      id: candidate.id,
+      name: candidate.name,
+      email: candidate.email,
+      phone: candidate.phone,
+      location: candidate.location,
+      preferredLocation: candidate.preferredLocation,
+      experienceYears: candidate.experienceYears,
+      relevantExperienceYears: candidate.relevantExperienceYears,
+      currentCompany: candidate.currentCompany,
+      currentDesignation: candidate.currentDesignation,
+      noticePeriod: candidate.noticePeriod,
+      availability: candidate.availability,
+      expectedSalary: candidate.expectedSalary,
+      education: candidate.education,
+      specialization: candidate.specialization,
+      skills: candidate.skills,
+      softSkills: candidate.softSkills,
+      resumeName: candidate.resumeName,
+      resumeScore: candidate.resumeScore,
+      source: candidate.source,
+      firstSource: candidate.firstSource,
+    },
+    matchingJobs,
     applications: candidate.applications.map((a) => ({
       id: a.id,
       jobTitle: a.requirement.title,
       client: a.requirement.client.name,
       location: a.requirement.client.location,
-      stage: a.stage,
+      // Never the internal stage — the candidate sees the masked vocabulary.
+      stage: candidateFacingStage(a.stage),
       interviewAt: a.interviewAt,
+      interviewType: a.interviewType,
+      interviewStatus: a.interviewStatus,
+      aiInterviewStatus: a.aiInterviewStatus,
+      aiInterviewScore: a.aiInterviewScore,
+      aiInterviewDeadline: a.aiInterviewDeadline,
+      source: a.source,
+      applicationMethod: a.applicationMethod,
       appliedAt: a.createdAt,
       updatedAt: a.updatedAt,
     })),

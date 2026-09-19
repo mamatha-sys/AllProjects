@@ -2,7 +2,7 @@ const express = require('express');
 const prisma = require('../db');
 const { requireAuth, requireRole, isDeptScopedRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
-const { MATCH_THRESHOLD, SUGGESTION_THRESHOLD, rankCandidates } = require('../utils/matching');
+const { MATCH_THRESHOLD, SUGGESTION_THRESHOLD, rankCandidates, computeMatch } = require('../utils/matching');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -26,16 +26,30 @@ router.get('/', async (req, res) => {
   if (req.query.clientId) where.clientId = req.query.clientId;
   const requirements = await prisma.requirement.findMany({
     where,
-    include: { client: true, recruiter: true, bde: true, _count: { select: { applications: true } } },
+    include: {
+      client: true,
+      recruiter: true,
+      bde: true,
+      _count: { select: { applications: true } },
+      applications: { select: { stage: true } },
+    },
     orderBy: { createdAt: 'desc' },
+  });
+
+  // The "Open Requirements" tab shows Openings / Filled / Remaining per row —
+  // the prototype's reqFilled() / reqRemaining() (openRequirementsHtml).
+  const withCounts = requirements.map((r) => {
+    const filled = r.applications.filter((a) => ['JOINED', 'HIRED'].includes(a.stage)).length;
+    const { applications, ...rest } = r;
+    return { ...rest, filled, remaining: Math.max(0, (r.openings || 1) - filled) };
   });
 
   // How many candidates in the master list clear the match threshold for each
   // requirement — the prototype's matchingCandidateCount(), computed live.
-  if (!MATCHING_ROLES.includes(req.user.role)) return res.json(requirements);
+  if (!MATCHING_ROLES.includes(req.user.role)) return res.json(withCounts);
   const candidates = await prisma.candidate.findMany();
   res.json(
-    requirements.map((r) => ({ ...r, matchingCandidates: rankCandidates(candidates, r).length }))
+    withCounts.map((r) => ({ ...r, matchingCandidates: rankCandidates(candidates, r).length }))
   );
 });
 
@@ -82,6 +96,21 @@ router.get('/:id/matching-candidates', requireRole(...MATCHING_ROLES), async (re
     threshold: req.query.threshold ? Number(req.query.threshold) : SUGGESTION_THRESHOLD,
   });
   res.json(ranked);
+});
+
+// The Add Candidate modal's "Calculate Match" button (prototype
+// acComputePreview(), line 8236): score a not-yet-saved candidate against a
+// requirement so the recruiter sees the number before committing the record.
+// Read-only — nothing is written.
+router.post('/preview-match', requireRole(...MATCHING_ROLES), async (req, res) => {
+  const { requirementId, candidate } = req.body || {};
+  if (!requirementId) return res.status(400).json({ error: 'Select a requirement first to calculate a match score.' });
+  const requirement = await prisma.requirement.findUnique({ where: { id: requirementId } });
+  if (!requirement) return res.status(404).json({ error: 'Requirement not found' });
+  if (!String(candidate?.skills || '').trim()) {
+    return res.status(400).json({ error: 'Enter at least one mandatory skill — no score is shown without it.' });
+  }
+  res.json(computeMatch(candidate, requirement));
 });
 
 // Every field the prototype's collectRequirementForm() (line 7062) gathers.

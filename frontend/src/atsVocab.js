@@ -58,6 +58,36 @@ export function stageLabel(code) {
 
 export const LIFE_STATUSES = ['Active', 'On Hold', 'Rejected', 'Closed'];
 
+// A candidate never sees the internal pipeline vocabulary — the prototype's
+// CANDIDATE_FACING_STAGE map (line 6642) collapses the eighteen internal
+// stages into the seven shown on the candidate's own portal. Mirrors
+// backend/src/utils/atsVocab.js; keep the two in step.
+export const CANDIDATE_FACING_STAGE = {
+  NEW: 'Applied',
+  AI_INTERVIEW_REQUIRED: 'Under Review',
+  AI_INTERVIEW_SCHEDULED: 'Under Review',
+  AI_INTERVIEW_COMPLETED: 'Under Review',
+  RECRUITER_REVIEW: 'Under Review',
+  RECRUITER_APPROVED: 'Under Review',
+  WITH_BDE: 'Under Review',
+  BDE_APPROVED: 'Under Review',
+  SHARED_WITH_CLIENT: 'Client Review',
+  CLIENT_REVIEW: 'Client Review',
+  CLIENT_SHORTLISTED: 'Interview',
+  INTERVIEW_SCHEDULED: 'Interview',
+  INTERVIEW_COMPLETED: 'Interview',
+  SELECTED: 'Selected',
+  OFFER: 'Offer',
+  OFFER_ACCEPTED: 'Offer',
+  JOINED: 'Joined',
+  HIRED: 'Joined',
+  REJECTED: 'Rejected',
+  HOLD: 'On Hold',
+};
+export function candidateFacingStage(code) {
+  return CANDIDATE_FACING_STAGE[code] || 'Under Review';
+}
+
 // Requirement status is stored as a code but shown the prototype's way.
 export const REQUIREMENT_STATUS_LABELS = {
   DRAFT: 'Draft',

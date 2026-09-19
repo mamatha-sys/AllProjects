@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import {
   agreementStatusLabel, DEPTS, LOCS, INDIAN_STATES, CLIENT_INDUSTRIES, CLIENT_STATUSES,
   CLIENT_TYPES, CLIENT_PRIORITIES, COMM_MODES, BUSINESS_TYPES, PAYMENT_TERMS,
-  INVOICE_TRIGGERS, AGREEMENT_TEMPLATES, RISK_FLAGS,
+  INVOICE_TRIGGERS, AGREEMENT_TEMPLATES, RISK_FLAGS, COMM_CHANNELS,
 } from '../atsVocab';
+import { Modal, Tabs, SecHead, agreementBadgeClass } from './ats/atsUi';
 
 // The prototype's Add Client modal (openAddClientModal, line 7296) is five
 // tabs; switchAddClientTab() names them in this order.
@@ -44,11 +45,13 @@ const EMPTY = {
 };
 
 export default function Clients() {
+  const navigate = useNavigate();
   const [clients, setClients] = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [tab, setTab] = useState('basic');
   const [showForm, setShowForm] = useState(false);
+  const [agreementPreview, setAgreementPreview] = useState('');
   const [error, setError] = useState('');
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -61,8 +64,30 @@ export default function Clients() {
     api.get('/requirements').then((res) => setRequirements(res.data)).catch(() => setRequirements([]));
   }, []);
 
+  // refreshAgreementPreview(): the template pane on the right of the modal
+  // fills in live from the fields on the left.
+  useEffect(() => {
+    if (!showForm) return undefined;
+    const t = setTimeout(() => {
+      api.post('/clients/preview-agreement', {
+        name: form.name, legalName: form.legalName, industry: form.industry,
+        location: form.location, agreementFeePercent: form.agreementFeePercent,
+      })
+        .then((res) => setAgreementPreview(res.data.document))
+        .catch(() => setAgreementPreview(''));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [showForm, form.name, form.legalName, form.industry, form.location, form.agreementFeePercent]);
+
   const openCount = (clientId) =>
     requirements.filter((r) => r.clientId === clientId && r.status === 'OPEN').length;
+
+  function closeForm() {
+    setForm(EMPTY);
+    setTab('basic');
+    setShowForm(false);
+    setError('');
+  }
 
   async function save(createAgreement) {
     setError('');
@@ -71,9 +96,7 @@ export default function Clients() {
     } catch (err) {
       return setError(err.response?.data?.error || 'Could not save this client');
     }
-    setForm(EMPTY);
-    setTab('basic');
-    setShowForm(false);
+    closeForm();
     load();
   }
 
@@ -84,25 +107,25 @@ export default function Clients() {
           <h1>Clients</h1>
           <div className="page-sub">{clients.length} client accounts</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : 'Add Client'}
-        </button>
+        <button className="btn btn-primary" onClick={() => setShowForm(true)}>Add Client</button>
       </div>
 
       {showForm && (
-        <form className="card section" onSubmit={(e) => { e.preventDefault(); save(true); }}>
-          <div className="tabbar">
-            {TABS.map(([key, label]) => (
-              <button
-                type="button"
-                key={key}
-                className={`tab-btn ${tab === key ? 'active' : ''}`}
-                onClick={() => setTab(key)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+        <Modal
+          title="Add Client"
+          size="xwide"
+          onClose={closeForm}
+          footer={(
+            <>
+              <button type="button" className="btn" onClick={closeForm}>Cancel</button>
+              <button type="button" className="btn" onClick={() => save(false)}>Save</button>
+              <button type="button" className="btn btn-primary" onClick={() => save(true)}>Save &amp; Create Agreement</button>
+            </>
+          )}
+        >
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 320 }}>
+          <Tabs tabs={TABS} value={tab} onChange={setTab} style={{ marginBottom: 12 }} />
 
           {tab === 'basic' && (
             <>
@@ -152,7 +175,7 @@ export default function Clients() {
                 </label>
               </div>
 
-              <h3>Primary Contact</h3>
+              <SecHead>Primary Contact</SecHead>
               <div className="grid-2">
                 <label className="field">
                   <span>Primary Name *</span>
@@ -176,7 +199,7 @@ export default function Clients() {
                 </label>
               </div>
 
-              <h3>Secondary Contact</h3>
+              <SecHead>Secondary Contact</SecHead>
               <div className="grid-2">
                 <label className="field">
                   <span>Secondary Name</span>
@@ -196,7 +219,7 @@ export default function Clients() {
                 </label>
               </div>
 
-              <h3>Client Address</h3>
+              <SecHead>Client Address</SecHead>
               <div className="grid-2">
                 <label className="field">
                   <span>House Number</span>
@@ -237,7 +260,7 @@ export default function Clients() {
                 </label>
               </div>
 
-              <h3>Classification &amp; Communication</h3>
+              <SecHead>Classification &amp; Communication</SecHead>
               <div className="grid-2">
                 <label className="field">
                   <span>Client Type</span>
@@ -332,6 +355,7 @@ export default function Clients() {
           )}
 
           {tab === 'agreement' && (
+            <>
             <div className="grid-2">
               <label className="field">
                 <span>Agreement Required</span>
@@ -359,10 +383,17 @@ export default function Clients() {
                 <input disabled value="Draft (until generated and signed)" />
               </label>
             </div>
+            <div className="notice">
+              &quot;Save &amp; Create Agreement&quot; generates the agreement document from the commercial terms on
+              the Legal &amp; Finance tab. It stays <b>Draft</b> until it is sent and signed — a client
+              requirement cannot be posted before the agreement is Active.
+            </div>
+            </>
           )}
 
           {tab === 'ownership' && (
             <>
+              <SecHead first>Ownership</SecHead>
               <div className="grid-2">
                 <label className="field">
                   <span>BDE / Client Owner</span>
@@ -373,10 +404,27 @@ export default function Clients() {
                   <input value={form.accountManager} onChange={(e) => set({ accountManager: e.target.value })} />
                 </label>
               </div>
-              <label className="field">
-                <span>Communication Preferences (comma separated)</span>
-                <input value={form.commChannels} onChange={(e) => set({ commChannels: e.target.value })} />
-              </label>
+              <SecHead>Communication Preferences</SecHead>
+              <div className="cell-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                Which channels this client is contacted on.
+              </div>
+              {COMM_CHANNELS.map((ch) => {
+                const on = form.commChannels.split(',').map((x) => x.trim()).filter(Boolean).includes(ch);
+                return (
+                  <label key={ch} style={{ display: 'flex', gap: 9, alignItems: 'center', padding: '5px 0', fontSize: 13, fontWeight: 400 }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto' }}
+                      checked={on}
+                      onChange={() => {
+                        const list = form.commChannels.split(',').map((x) => x.trim()).filter(Boolean);
+                        set({ commChannels: (on ? list.filter((x) => x !== ch) : [...list, ch]).join(',') });
+                      }}
+                    />
+                    {' '}{ch}
+                  </label>
+                );
+              })}
             </>
           )}
 
@@ -395,12 +443,31 @@ export default function Clients() {
             </>
           )}
 
-          {error && <div className="error-text">{error}</div>}
-          <div className="qa-row">
-            <button className="btn btn-sm" type="button" onClick={() => save(false)}>Save</button>
-            <button className="btn btn-primary btn-sm" type="submit">Save &amp; Create Agreement</button>
+          {error && <div className="notice red">{error}</div>}
           </div>
-        </form>
+
+          <div style={{
+            flex: 1,
+            minWidth: 320,
+            background: 'var(--paper)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            padding: 14,
+            maxHeight: 520,
+            overflowY: 'auto',
+          }}
+          >
+            <h4 style={{ fontSize: 13, marginBottom: 4 }}>Agreement Template Preview</h4>
+            <div className="small-muted" style={{ fontSize: 11, marginBottom: 10 }}>
+              Updates live from the fields on the left — same master template used everywhere, just filled
+              with this client&apos;s values.
+            </div>
+            <div className="small-muted" style={{ whiteSpace: 'pre-line', fontSize: 10.5, lineHeight: 1.5 }}>
+              {agreementPreview || 'Enter a company name to see the agreement fill in.'}
+            </div>
+          </div>
+          </div>
+        </Modal>
       )}
 
       <div className="tbl-wrap">
@@ -413,16 +480,22 @@ export default function Clients() {
           </thead>
           <tbody>
             {clients.map((c) => (
-              <tr key={c.id} className="row-link">
-                <td><Link to={`/clients/${c.id}`}>{c.name}</Link></td>
+              <tr key={c.id} className="row-link" onClick={() => navigate(`/clients/${c.id}`)}>
+                <td>{c.name}</td>
                 <td>{c.industry || '—'}</td>
                 <td>{c.location || '—'}</td>
                 <td>{c.accountManager || '—'}</td>
-                <td><span className="status">{agreementStatusLabel(c.agreementStatus)}</span></td>
+                <td>
+                  <span className={`status ${agreementBadgeClass(c.agreementStatus)}`}>
+                    {agreementStatusLabel(c.agreementStatus)}
+                  </span>
+                </td>
                 <td>{openCount(c.id)}</td>
               </tr>
             ))}
-            {clients.length === 0 && <tr><td colSpan="6" className="small-muted">No clients in your scope.</td></tr>}
+            {clients.length === 0 && (
+              <tr><td colSpan="6" className="small-muted" style={{ padding: 16 }}>No clients in your scope.</td></tr>
+            )}
           </tbody>
         </table>
       </div>

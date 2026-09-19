@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
 import {
   ALL_STAGE_CODES, stageLabel, LIFE_STATUSES, DEPTS, LOCS,
@@ -7,6 +7,9 @@ import {
   CANDIDATE_GENDERS, CANDIDATE_NOTICE_PERIODS, CANDIDATE_AVAILABILITY, CANDIDATE_JOB_PREFERENCES,
   CANDIDATE_EMPLOYMENT_TYPES, CANDIDATE_WORK_MODES, CANDIDATE_EDUCATION,
 } from '../atsVocab';
+import {
+  Modal, SecHead, Tabs, Avatar, StatusBadge, LifeBadge, aiClass, KV, fmtDate,
+} from './ats/atsUi';
 
 // The prototype's Add Candidate modal (openAddCandidateModal, line 8150),
 // section by section: A Personal, B Professional, C Education, D Skills,
@@ -29,21 +32,20 @@ const EMPTY_FILTERS = {
   tl: '', bde: '', location: '', source: '', stage: '', status: '', appliedOn: '',
 };
 
-function lifeClass(status) {
-  if (status === 'Active') return 'priority-low';
-  if (status === 'Rejected') return 'priority-high';
-  if (status === 'On Hold') return 'priority-medium';
-  return '';
-}
-
 export default function Candidates() {
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [candidates, setCandidates] = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [team, setTeam] = useState([]);
   const [form, setForm] = useState(EMPTY);
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  // ?stage= deep-links from the ATS dashboard's "Pipeline by stage" rows.
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS, stage: params.get('stage') || '' });
+  const [view, setView] = useState('pipeline');
   const [showForm, setShowForm] = useState(false);
-  const [duplicate, setDuplicate] = useState('');
+  const [duplicate, setDuplicate] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [resumePanel, setResumePanel] = useState(null);
   const [error, setError] = useState('');
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
@@ -88,14 +90,70 @@ export default function Candidates() {
     });
   }, [candidates, filters]);
 
+  // rejectedRows() — rejection never removes the Candidate Master record;
+  // these rows are joins onto applications that carry a rejection.
+  const rejected = useMemo(() => {
+    const out = [];
+    candidates.forEach((c) => (c.applications || []).forEach((a) => {
+      if (a.stage === 'REJECTED') out.push({ candidate: c, app: a });
+    }));
+    return out;
+  }, [candidates]);
+
+  // sourceAnalyticsHtml() — computed live from the candidate and application
+  // records, first source vs latest source tracked per candidate.
+  const sourceRows = useMemo(() => {
+    const by = {};
+    const bucket = (k) => {
+      by[k] = by[k] || { first: 0, latest: 0, apps: 0, auto: 0, manual: 0 };
+      return by[k];
+    };
+    candidates.forEach((c) => {
+      const first = c.firstSource || c.source || 'Unknown';
+      const latest = c.source || first;
+      bucket(first).first += 1;
+      bucket(latest).latest += 1;
+    });
+    let auto = 0; let manual = 0; let autoPending = 0;
+    candidates.forEach((c) => (c.applications || []).forEach((a) => {
+      const b = bucket(a.source || 'Unknown');
+      b.apps += 1;
+      if ((a.applicationMethod || 'Manual') === 'Auto-Apply') {
+        b.auto += 1; auto += 1;
+        if (a.stage === 'NEW') autoPending += 1;
+      } else { b.manual += 1; manual += 1; }
+    }));
+    const autoOk = candidates.reduce((n, c) => n + (c.applications || [])
+      .filter((a) => a.applicationMethod === 'Auto-Apply' && a.stage !== 'REJECTED').length, 0);
+    const keys = Object.keys(by).sort((x, y) => by[y].latest - by[x].latest);
+    return { by, keys, auto, manual, autoOk, autoPending };
+  }, [candidates]);
+
   async function checkDuplicate() {
-    if (!form.email && !form.phone) return setDuplicate('');
+    if (!form.email && !form.phone) return setDuplicate(null);
     const res = await api.get('/candidates/check-duplicate', { params: { email: form.email, phone: form.phone } });
-    setDuplicate(
-      res.data.duplicate
-        ? `Already on file: ${res.data.matches.map((m) => m.name).join(', ')}. Save again to add anyway.`
-        : ''
-    );
+    setDuplicate(res.data.duplicate ? res.data.matches[0] : null);
+  }
+
+  // The prototype's acComputePreview(): a deterministic match against the
+  // selected requirement, shown before the record is saved.
+  async function calculateMatch() {
+    setPreview(null);
+    if (!form.requirementId) {
+      return setPreview({ warn: 'Select a requirement first to calculate a match score.' });
+    }
+    if (!form.skills.trim()) {
+      return setPreview({ warn: 'Enter at least one mandatory skill — no score is shown without it.' });
+    }
+    try {
+      const res = await api.post('/requirements/preview-match', {
+        requirementId: form.requirementId,
+        candidate: { ...form, experienceYears: form.experienceYears },
+      });
+      setPreview({ ...res.data, requirementTitle: requirements.find((r) => r.id === form.requirementId)?.title });
+    } catch {
+      setPreview({ warn: 'Could not calculate a match score right now.' });
+    }
   }
 
   async function createCandidate(e) {
@@ -111,16 +169,38 @@ export default function Candidates() {
     try {
       await api.post('/candidates', body);
     } catch (err) {
-      if (err.response?.status === 409) return setDuplicate(err.response.data.error);
+      if (err.response?.status === 409) {
+        return setDuplicate(err.response.data.matches?.[0] || { name: err.response.data.error });
+      }
       return setError(err.response?.data?.error || 'Could not save this candidate');
     }
-    setForm(EMPTY);
-    setDuplicate('');
-    setShowForm(false);
+    closeForm();
     load();
   }
 
+  function closeForm() {
+    setForm(EMPTY);
+    setDuplicate(null);
+    setPreview(null);
+    setResumePanel(null);
+    setError('');
+    setShowForm(false);
+  }
+
+  // acResumePicked(): a labelled simulation — the panel only echoes what the
+  // form already holds, and no score is invented without a resume.
+  function resumePicked(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) { setResumePanel(null); set({ resumeName: '' }); return; }
+    set({ resumeName: file.name });
+    const skills = form.skills.split(',').map((s) => s.trim()).filter(Boolean);
+    const exp = parseFloat(form.experienceYears) || 0;
+    const score = skills.length ? Math.round(Math.min(95, 55 + skills.length * 6 + exp * 2)) : null;
+    setResumePanel({ name: file.name, score, skills, exp: form.experienceYears });
+  }
+
   const tlNames = [...new Set(requirements.map((r) => r.tl).filter(Boolean))];
+  const pickedReq = requirements.find((r) => r.id === form.requirementId);
 
   return (
     <div>
@@ -129,204 +209,287 @@ export default function Candidates() {
           <h1>Candidates &amp; Pipeline</h1>
           <div className="page-sub">{candidates.length} candidates in the database</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : 'Add Candidate'}
-        </button>
+        <button className="btn btn-primary" onClick={() => setShowForm(true)}>Add Candidate</button>
       </div>
 
       {showForm && (
-        <form className="card section" onSubmit={createCandidate}>
-          <h3>A. Personal</h3>
-          <div className="grid-2">
-            <label className="field">
-              <span>First Name *</span>
-              <input required value={form.firstName} onChange={(e) => set({ firstName: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Last Name</span>
-              <input value={form.lastName} onChange={(e) => set({ lastName: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Mobile *</span>
-              <input required placeholder="10-digit mobile" value={form.phone} onBlur={checkDuplicate} onChange={(e) => set({ phone: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Email *</span>
-              <input required value={form.email} onBlur={checkDuplicate} onChange={(e) => set({ email: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Date of Birth</span>
-              <input type="date" value={form.dob} onChange={(e) => set({ dob: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Gender</span>
-              <select value={form.gender} onChange={(e) => set({ gender: e.target.value })}>
-                {CANDIDATE_GENDERS.map((g) => <option key={g}>{g}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Current Location</span>
-              <select value={form.location} onChange={(e) => set({ location: e.target.value })}>
-                {LOCS.map((l) => <option key={l}>{l}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Preferred Location</span>
-              <select value={form.preferredLocation} onChange={(e) => set({ preferredLocation: e.target.value })}>
-                <option value="">Same as current</option>
-                {LOCS.map((l) => <option key={l}>{l}</option>)}
-              </select>
-            </label>
-          </div>
+        <Modal
+          title="Add Candidate"
+          size="xwide"
+          onClose={closeForm}
+          footer={(
+            <>
+              <button type="button" className="btn" onClick={closeForm}>Cancel</button>
+              <button type="button" className="btn" onClick={calculateMatch}>Calculate Match</button>
+              <button type="submit" form="addCandidateForm" className="btn btn-primary">Save Candidate</button>
+            </>
+          )}
+        >
+          <form id="addCandidateForm" onSubmit={createCandidate}>
+            <SecHead letter="A" first>Personal</SecHead>
+            <div className="grid-2">
+              <div className="field">
+                <label>First Name *</label>
+                <input required value={form.firstName} onChange={(e) => set({ firstName: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Last Name</label>
+                <input value={form.lastName} onChange={(e) => set({ lastName: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Mobile *</label>
+                <input required placeholder="10-digit mobile" value={form.phone} onBlur={checkDuplicate} onChange={(e) => set({ phone: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Email *</label>
+                <input required value={form.email} onBlur={checkDuplicate} onChange={(e) => set({ email: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Date of Birth</label>
+                <input type="date" value={form.dob} onChange={(e) => set({ dob: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Gender</label>
+                <select value={form.gender} onChange={(e) => set({ gender: e.target.value })}>
+                  {CANDIDATE_GENDERS.map((g) => <option key={g}>{g}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Current Location</label>
+                <select value={form.location} onChange={(e) => set({ location: e.target.value })}>
+                  {LOCS.map((l) => <option key={l}>{l}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Preferred Location</label>
+                <select value={form.preferredLocation} onChange={(e) => set({ preferredLocation: e.target.value })}>
+                  <option value="">Same as current</option>
+                  {LOCS.map((l) => <option key={l}>{l}</option>)}
+                </select>
+              </div>
+            </div>
 
-          <h3>B. Professional</h3>
-          <div className="grid-2">
-            <label className="field">
-              <span>Current Company</span>
-              <input value={form.currentCompany} onChange={(e) => set({ currentCompany: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Current Designation</span>
-              <input value={form.currentDesignation} onChange={(e) => set({ currentDesignation: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Total Experience (yrs)</span>
-              <input type="number" step="0.5" value={form.experienceYears} onChange={(e) => set({ experienceYears: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Relevant Experience (yrs)</span>
-              <input type="number" step="0.5" value={form.relevantExperienceYears} onChange={(e) => set({ relevantExperienceYears: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Current Salary (₹L)</span>
-              <input placeholder="e.g. 12L" value={form.currentSalary} onChange={(e) => set({ currentSalary: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Expected Salary (₹L)</span>
-              <input placeholder="e.g. 18L" value={form.expectedSalary} onChange={(e) => set({ expectedSalary: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Notice Period</span>
-              <select value={form.noticePeriod} onChange={(e) => set({ noticePeriod: e.target.value })}>
-                {CANDIDATE_NOTICE_PERIODS.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Availability</span>
-              <select value={form.availability} onChange={(e) => set({ availability: e.target.value })}>
-                {CANDIDATE_AVAILABILITY.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Job Preference</span>
-              <select value={form.jobPreference} onChange={(e) => set({ jobPreference: e.target.value })}>
-                {CANDIDATE_JOB_PREFERENCES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Employment Type</span>
-              <select value={form.preferredEmploymentType} onChange={(e) => set({ preferredEmploymentType: e.target.value })}>
-                {CANDIDATE_EMPLOYMENT_TYPES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Preferred Work Mode</span>
-              <select value={form.preferredWorkMode} onChange={(e) => set({ preferredWorkMode: e.target.value })}>
-                {CANDIDATE_WORK_MODES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-          </div>
+            {/* The prototype writes its duplicate warning into #acDupWarning — an
+                element its modal never renders, so the warning is dead code
+                there. The intent is implemented here: the warning appears in the
+                modal, with both of the prototype's follow-up actions. */}
+            {duplicate && (
+              <div className="notice amber">
+                Candidate already exists — <strong>{duplicate.name}</strong>{duplicate.id ? ` (${duplicate.id})` : ''}.
+                <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                  {duplicate.id && (
+                    <button type="button" className="btn btn-sm" onClick={() => { closeForm(); navigate(`/candidates/${duplicate.id}`); }}>
+                      Open Existing Profile
+                    </button>
+                  )}
+                  <button type="submit" form="addCandidateForm" className="btn btn-sm btn-primary">
+                    Add New Application to This Candidate
+                  </button>
+                </div>
+              </div>
+            )}
 
-          <h3>C. Education</h3>
-          <div className="grid-2">
-            <label className="field">
-              <span>Highest Qualification</span>
-              <select value={form.education} onChange={(e) => set({ education: e.target.value })}>
-                {CANDIDATE_EDUCATION.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Specialization</span>
-              <input placeholder="e.g. Computer Science" value={form.specialization} onChange={(e) => set({ specialization: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Institute</span>
-              <input value={form.institute} onChange={(e) => set({ institute: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Passing Year</span>
-              <input type="number" placeholder="2019" value={form.passingYear} onChange={(e) => set({ passingYear: e.target.value })} />
-            </label>
-          </div>
+            <SecHead letter="B">Professional</SecHead>
+            <div className="grid-2">
+              <div className="field">
+                <label>Current Company</label>
+                <input value={form.currentCompany} onChange={(e) => set({ currentCompany: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Current Designation</label>
+                <input value={form.currentDesignation} onChange={(e) => set({ currentDesignation: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Total Experience (yrs)</label>
+                <input type="number" step="0.5" value={form.experienceYears} onChange={(e) => set({ experienceYears: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Relevant Experience (yrs)</label>
+                <input type="number" step="0.5" value={form.relevantExperienceYears} onChange={(e) => set({ relevantExperienceYears: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Current Salary (₹L)</label>
+                <input placeholder="e.g. 12L" value={form.currentSalary} onChange={(e) => set({ currentSalary: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Expected Salary (₹L)</label>
+                <input placeholder="e.g. 18L" value={form.expectedSalary} onChange={(e) => set({ expectedSalary: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Notice Period</label>
+                <select value={form.noticePeriod} onChange={(e) => set({ noticePeriod: e.target.value })}>
+                  {CANDIDATE_NOTICE_PERIODS.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Availability</label>
+                <select value={form.availability} onChange={(e) => set({ availability: e.target.value })}>
+                  {CANDIDATE_AVAILABILITY.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Job Preference</label>
+                <select value={form.jobPreference} onChange={(e) => set({ jobPreference: e.target.value })}>
+                  {CANDIDATE_JOB_PREFERENCES.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Employment Type</label>
+                <select value={form.preferredEmploymentType} onChange={(e) => set({ preferredEmploymentType: e.target.value })}>
+                  {CANDIDATE_EMPLOYMENT_TYPES.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Preferred Work Mode</label>
+                <select value={form.preferredWorkMode} onChange={(e) => set({ preferredWorkMode: e.target.value })}>
+                  {CANDIDATE_WORK_MODES.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+            </div>
 
-          <h3>D. Skills</h3>
-          <label className="field">
-            <span>Mandatory Skills * (comma separated)</span>
-            <input required placeholder="Java, Spring Boot, SQL" value={form.skills} onChange={(e) => set({ skills: e.target.value })} />
-          </label>
-          <div className="grid-2">
-            <label className="field">
-              <span>Good-to-have Skills</span>
-              <input placeholder="AWS, Docker" value={form.goodToHaveSkills} onChange={(e) => set({ goodToHaveSkills: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Technical Skills</span>
-              <input placeholder="Git, Jenkins" value={form.technicalSkills} onChange={(e) => set({ technicalSkills: e.target.value })} />
-            </label>
-          </div>
-          <label className="field">
-            <span>Soft Skills</span>
-            <input placeholder="Communication, Stakeholder management" value={form.softSkills} onChange={(e) => set({ softSkills: e.target.value })} />
-          </label>
+            <SecHead letter="C">Education</SecHead>
+            <div className="grid-2">
+              <div className="field">
+                <label>Highest Qualification</label>
+                <select value={form.education} onChange={(e) => set({ education: e.target.value })}>
+                  {CANDIDATE_EDUCATION.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Specialization</label>
+                <input placeholder="e.g. Computer Science" value={form.specialization} onChange={(e) => set({ specialization: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Institute</label>
+                <input value={form.institute} onChange={(e) => set({ institute: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Passing Year</label>
+                <input type="number" placeholder="2019" value={form.passingYear} onChange={(e) => set({ passingYear: e.target.value })} />
+              </div>
+            </div>
 
-          <h3>E. Resume</h3>
-          <label className="field">
-            <span>Resume Name</span>
-            <input placeholder="No file chosen" value={form.resumeName} onChange={(e) => set({ resumeName: e.target.value })} />
-          </label>
+            <SecHead letter="D">Skills</SecHead>
+            <div className="field">
+              <label>Mandatory Skills * (comma separated)</label>
+              <input required placeholder="Java, Spring Boot, SQL" value={form.skills} onChange={(e) => set({ skills: e.target.value })} />
+            </div>
+            <div className="grid-2">
+              <div className="field">
+                <label>Good-to-have Skills</label>
+                <input placeholder="AWS, Docker" value={form.goodToHaveSkills} onChange={(e) => set({ goodToHaveSkills: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Technical Skills</label>
+                <input placeholder="Git, Jenkins" value={form.technicalSkills} onChange={(e) => set({ technicalSkills: e.target.value })} />
+              </div>
+            </div>
+            <div className="field">
+              <label>Soft Skills</label>
+              <input placeholder="Communication, Stakeholder management" value={form.softSkills} onChange={(e) => set({ softSkills: e.target.value })} />
+            </div>
 
-          <h3>F. Source</h3>
-          <div className="grid-2">
-            <label className="field">
-              <span>Source</span>
-              <select value={form.source} onChange={(e) => set({ source: e.target.value })}>
-                {CANDIDATE_SOURCES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>First Source</span>
-              <select value={form.firstSource} onChange={(e) => set({ firstSource: e.target.value })}>
-                <option value="">Same as source</option>
-                {CANDIDATE_FIRST_SOURCES.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Source Campaign</span>
-              <input placeholder="e.g. Sep-2026 Java drive" value={form.sourceCampaign} onChange={(e) => set({ sourceCampaign: e.target.value })} />
-            </label>
-            <label className="field">
-              <span>Application Method</span>
-              <select value={form.applicationMethod} onChange={(e) => set({ applicationMethod: e.target.value })}>
-                {APPLICATION_METHODS.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </label>
-          </div>
+            <SecHead letter="E">Resume</SecHead>
+            <div className="grid-2">
+              <div className="field">
+                <label>Upload Resume</label>
+                <input type="file" onChange={resumePicked} />
+              </div>
+              <div className="field">
+                <label>Resume Name</label>
+                <input readOnly placeholder="No file chosen" value={form.resumeName} />
+              </div>
+            </div>
+            {resumePanel ? (
+              <div>
+                <div className="notice">
+                  Resume attached — <b>{resumePanel.name}</b>. <span className="status pending">AI parsing: Simulated</span>
+                </div>
+                <KV k="Resume Score">{resumePanel.score != null ? `${resumePanel.score}%` : '— (add skills to compute)'}</KV>
+                <KV k="AI-parsed skills">{resumePanel.skills.length ? resumePanel.skills.join(', ') : '—'}</KV>
+                <KV k="AI-parsed experience">{resumePanel.exp ? `${resumePanel.exp} yrs` : '—'}</KV>
+                <div className="cell-muted" style={{ fontSize: 11.5, fontStyle: 'italic' }}>
+                  Parsed values mirror what you entered — this prototype does not read the file contents.
+                </div>
+              </div>
+            ) : (
+              <div className="cell-muted" style={{ fontSize: 12 }}>
+                Resume Score and AI-parsed fields appear only after a resume is attached — no score is shown for a candidate without one.
+              </div>
+            )}
 
-          <h3>G. Requirement</h3>
-          <label className="field">
-            <span>Apply to Requirement</span>
-            <select value={form.requirementId} onChange={(e) => set({ requirementId: e.target.value })}>
-              <option value="">None — add to database only</option>
-              {requirements.filter((r) => r.status !== 'CLOSED').map((r) => (
-                <option key={r.id} value={r.id}>{r.title} — {r.internal ? 'TeamLink Internal' : r.client?.name}</option>
-              ))}
-            </select>
-          </label>
+            <SecHead letter="F">Source</SecHead>
+            <div className="grid-2">
+              <div className="field">
+                <label>Source</label>
+                <select value={form.source} onChange={(e) => set({ source: e.target.value })}>
+                  {CANDIDATE_SOURCES.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>First Source</label>
+                <select value={form.firstSource} onChange={(e) => set({ firstSource: e.target.value })}>
+                  <option value="">Same as source</option>
+                  {CANDIDATE_FIRST_SOURCES.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label>Source Campaign</label>
+                <input placeholder="e.g. Sep-2026 Java drive" value={form.sourceCampaign} onChange={(e) => set({ sourceCampaign: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Application Method</label>
+                <select value={form.applicationMethod} onChange={(e) => set({ applicationMethod: e.target.value })}>
+                  {APPLICATION_METHODS.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </div>
+            </div>
 
-          {duplicate && <div className="error-text">{duplicate}</div>}
-          {error && <div className="error-text">{error}</div>}
-          <button className="btn btn-primary btn-sm" type="submit">Save Candidate</button>
-        </form>
+            <SecHead letter="G">Requirement</SecHead>
+            <div className="grid-2">
+              <div className="field">
+                <label>Apply to Requirement</label>
+                <select value={form.requirementId} onChange={(e) => set({ requirementId: e.target.value })}>
+                  <option value="">None — add to database only</option>
+                  {requirements.filter((r) => r.status !== 'CLOSED').map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title} — {r.internal ? 'TeamLink Internal' : r.client?.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label>Requirement ID / Client</label>
+                <input
+                  readOnly
+                  placeholder="—"
+                  value={pickedReq ? `${pickedReq.id} · ${pickedReq.internal ? 'TeamLink Internal' : pickedReq.client?.name || '—'}` : ''}
+                />
+              </div>
+            </div>
+            {preview ? (
+              preview.warn
+                ? <div className="notice amber">{preview.warn}</div>
+                : (
+                  <div>
+                    <KV k="AI Match Score"><span style={{ fontWeight: 600 }}>{preview.overall}%</span></KV>
+                    <KV k="Matched mandatory skills">{(preview.matchedSkills || []).join(', ') || 'none'}</KV>
+                    <KV k="Missing mandatory skills">{(preview.missingSkills || []).join(', ') || 'none'}</KV>
+                    <KV k="AI Interview"><span className="status pending">Required</span></KV>
+                    <div className="cell-muted" style={{ fontSize: 11.5 }}>
+                      Deterministic score against {preview.requirementTitle}.
+                    </div>
+                  </div>
+                )
+            ) : (
+              <div className="cell-muted" style={{ fontSize: 12 }}>
+                AI Match Score is calculated against the selected requirement once mandatory skills and
+                experience are filled in. AI Interview status starts as <b>Required</b>.
+              </div>
+            )}
+            {error && <div className="notice red">{error}</div>}
+          </form>
+        </Modal>
       )}
 
       <div className="filter-row">
@@ -375,38 +538,148 @@ export default function Candidates() {
         <button className="btn btn-sm" onClick={() => setFilters(EMPTY_FILTERS)}>Clear</button>
       </div>
 
-      <div className="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Candidate</th><th>ID</th><th>Current Stage</th><th>Owner</th><th>Next Action</th>
-              <th>Due Date</th><th>Match Score</th><th>Status</th><th>AI Interview</th><th>Follow-up</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} className="row-link">
-                <td><Link to={`/candidates/${c.id}`}>{c.name}</Link></td>
-                <td>{c.id}</td>
-                <td>{c.currentStage ? <span className="status">{c.currentStageLabel}</span> : <span className="small-muted">No application</span>}</td>
-                <td>{c.owner || '—'}</td>
-                <td>{c.nextAction || '—'}</td>
-                <td>
-                  {c.dueDate || '—'}
-                  {c.overdue && <span className="status priority-high"> Overdue</span>}
-                </td>
-                <td>{c.matchScore != null ? `${c.matchScore}%` : '—'}</td>
-                <td>{c.lifeStatus ? <span className={`status ${lifeClass(c.lifeStatus)}`}>{c.lifeStatus}</span> : '—'}</td>
-                <td>{c.currentStage ? <span className="status">{c.aiInterviewStatus}</span> : '—'}</td>
-                {/* Follow-up logging is not implemented yet — the column is the
-                    prototype's, the action behind it is still to come. */}
-                <td className="small-muted">—</td>
+      <Tabs
+        style={{ marginBottom: 12 }}
+        value={view}
+        onChange={setView}
+        tabs={[
+          ['pipeline', 'Pipeline'],
+          ['rejected', `Rejected (${rejected.length})`],
+          ['sources', 'Source Analytics'],
+        ]}
+      />
+
+      {view === 'pipeline' && (
+        <div className="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Candidate</th><th>ID</th><th>Current Stage</th><th>Owner</th><th>Next Action</th>
+                <th>Due Date</th><th>Match Score</th><th>Status</th><th>AI Interview</th><th>Follow-up</th>
               </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan="10" className="small-muted">No candidates match.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.id} className="row-link" onClick={() => navigate(`/candidates/${c.id}`)}>
+                  <td><Avatar name={c.name} />{c.name}</td>
+                  <td>{c.id}</td>
+                  <td><StatusBadge stage={c.currentStage} label={c.currentStageLabel} /></td>
+                  <td className="cell-muted">{c.owner || '—'}</td>
+                  <td className="cell-muted">{c.nextAction || '—'}</td>
+                  <td className="cell-muted">
+                    {fmtDate(c.dueDate)}
+                    {c.overdue && <> <span className="status rejected">Overdue</span></>}
+                  </td>
+                  <td>{c.matchScore != null ? `${c.matchScore}%` : '—'}</td>
+                  <td><LifeBadge status={c.lifeStatus} /></td>
+                  <td>
+                    {c.currentStage
+                      ? <span className={`status ${aiClass(c.aiInterviewStatus)}`}>{c.aiInterviewStatus}</span>
+                      : <span className="cell-muted">—</span>}
+                  </td>
+                  {/* Follow-up logging is not implemented yet — the column is the
+                      prototype's, the action behind it is still to come. */}
+                  <td className="cell-muted">—</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan="10" className="small-muted" style={{ padding: 16 }}>No candidates match.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'rejected' && (
+        <>
+          <div className="cell-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            Rejected candidates stay in the Candidate Master and remain searchable and matchable for other
+            requirements. Internal rejection reasoning is never shown to client users.
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Candidate</th><th>Candidate ID</th><th>Requirement</th><th>Client</th><th>Previous Stage</th>
+                  <th>Rejected By</th><th>Rejected Side</th><th>Reason</th><th>Detailed Reason</th>
+                  <th>Rejected Date</th><th>Recruiter</th><th>BDE</th><th>TL</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rejected.map(({ candidate, app }) => (
+                  <tr key={app.id}>
+                    <td>{candidate.name}</td>
+                    <td className="cell-muted">{candidate.id}</td>
+                    <td>{app.requirement?.title || '—'}</td>
+                    <td className="cell-muted">{app.requirement?.client?.name || '—'}</td>
+                    <td className="cell-muted">—</td>
+                    <td className="cell-muted">—</td>
+                    <td className="cell-muted">—</td>
+                    <td className="cell-muted">—</td>
+                    <td>—</td>
+                    <td className="cell-muted">{fmtDate(app.updatedAt)}</td>
+                    <td className="cell-muted">{app.requirement?.recruiter?.name || '—'}</td>
+                    <td className="cell-muted">{app.requirement?.bde?.name || '—'}</td>
+                    <td className="cell-muted">{app.requirement?.tl || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button className="btn btn-sm" onClick={() => navigate(`/candidates/${candidate.id}`)}>View Profile</button>{' '}
+                      <button className="btn btn-sm" onClick={() => navigate(`/candidates/${candidate.id}?tab=rejection`)}>Rejection History</button>{' '}
+                      <button className="btn btn-sm" onClick={() => navigate(`/candidates/${candidate.id}?tab=matching`)}>Other Matches</button>
+                    </td>
+                  </tr>
+                ))}
+                {rejected.length === 0 && (
+                  <tr><td colSpan="14" className="small-muted" style={{ padding: 16 }}>No rejected candidates in your scope.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view === 'sources' && (
+        <>
+          <div className="section-label">Auto-apply</div>
+          <div className="cell-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            Total auto-apply: <b>{sourceRows.auto}</b> · Successful: <b>{sourceRows.autoOk}</b>
+            {' '}· Pending: <b>{sourceRows.autoPending}</b> · Manual applications: <b>{sourceRows.manual}</b>
+          </div>
+          <div className="section-label">Source-wise candidates</div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th><th>Candidates (latest source)</th><th>Candidates (first source)</th>
+                  <th>Applications</th><th>Auto-apply</th><th>Manual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceRows.keys.map((k) => (
+                  <tr
+                    key={k}
+                    className="row-link"
+                    onClick={() => { setView('pipeline'); setFilter({ source: k }); }}
+                  >
+                    <td><b>{k}</b></td>
+                    <td>{sourceRows.by[k].latest}</td>
+                    <td className="cell-muted">{sourceRows.by[k].first}</td>
+                    <td className="cell-muted">{sourceRows.by[k].apps}</td>
+                    <td className="cell-muted">{sourceRows.by[k].auto}</td>
+                    <td className="cell-muted">{sourceRows.by[k].manual}</td>
+                  </tr>
+                ))}
+                {sourceRows.keys.length === 0 && (
+                  <tr><td colSpan="6" className="small-muted" style={{ padding: 16 }}>No source data yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+            Counts are computed live from the candidate and application records — a candidate arriving from a
+            second source updates their latest source, it never creates a duplicate master record.
+          </div>
+        </>
+      )}
     </div>
   );
 }
