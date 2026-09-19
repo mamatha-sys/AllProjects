@@ -62,6 +62,11 @@ export default function EmployeeDetail() {
     load();
   }
 
+  async function decideUnlock(action) {
+    await api.patch(`/employees/${id}/unlock-request/${action}`);
+    load();
+  }
+
   if (!employee) return <div className="small-muted">Loading…</div>;
 
   const onboardingDone = employee.onboardingTasks ? employee.onboardingTasks.filter((t) => t.completed).length : 0;
@@ -75,20 +80,35 @@ export default function EmployeeDetail() {
         <h1>{employee.name}</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className={`status ${employee.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(employee.employmentStatus) ? 'priority-high' : ''}`}>{employee.employmentStatus}</span>
+          <span className={`status ${employee.profileStage === 'Locked' ? 'priority-low' : employee.profileStage === 'Pending Review' ? 'priority-medium' : ''}`}>{employee.profileStage === 'Locked' ? '🔒 Locked' : employee.profileStage}</span>
           {isHR && !editing && <button className="btn btn-sm" onClick={startEdit}>Edit</button>}
         </div>
       </div>
 
       {employee.pendingChanges && (
         <div className="card section" style={{ borderColor: 'var(--warn)' }}>
-          <h3>Profile changes pending review</h3>
+          <h3>Profile submitted — awaiting review</h3>
           {employee.pendingChanges.map((c, i) => (
             <div className="kv" key={i}><span className="k">{c.label}</span><span>{c.from || '—'} → {c.to}</span></div>
           ))}
           {isHR && (
             <div style={{ marginTop: 10 }}>
-              <button className="btn btn-primary btn-sm" onClick={() => decideChanges('approve')}>Approve</button>{' '}
+              <button className="btn btn-primary btn-sm" onClick={() => decideChanges('approve')}>Approve (locks profile)</button>{' '}
               <button className="btn btn-sm" onClick={() => decideChanges('reject')}>Send back</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {employee.unlockRequestStatus === 'Pending' && (
+        <div className="card section" style={{ borderColor: 'var(--warn)' }}>
+          <h3>Edit access requested</h3>
+          <div className="kv"><span className="k">Reason</span><span>{employee.unlockRequestReason}</span></div>
+          <div className="small-muted">Request {employee.unlockRequestCount} of 3 for this employee.</div>
+          {isHR && (
+            <div style={{ marginTop: 10 }}>
+              <button className="btn btn-primary btn-sm" onClick={() => decideUnlock('approve')}>Grant Edit Access</button>{' '}
+              <button className="btn btn-sm" onClick={() => decideUnlock('reject')}>Deny</button>
             </div>
           )}
         </div>

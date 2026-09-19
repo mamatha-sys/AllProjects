@@ -157,6 +157,11 @@ model Employee {
   offboardingStatus String?  // null | Serving Notice | Cleared
   offboardingTasks  String?  // JSON array of {task, completed}
   pendingChanges    String?  // JSON array of {field, from, to} awaiting HR approval
+  profileStage      String   @default("Assigned") // Assigned | Pending Review | Locked
+  isLocked          Boolean  @default(false) // once HR approves the filled-in profile, the employee can no longer self-edit
+  unlockRequestReason String? // reason selected when requesting edit access on a locked profile
+  unlockRequestStatus String? // null | Pending | Approved | Rejected
+  unlockRequestCount  Int     @default(0) // lifetime count, capped (see UNLOCK_REQUEST_LIMIT)
   reportingManagerId String?
   reportingManager    Employee?  @relation("ManagerReports", fields: [reportingManagerId], references: [id])
   directReports       Employee[] @relation("ManagerReports")

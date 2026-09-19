@@ -64,7 +64,7 @@ async function main() {
       department: 'HR', designation: 'HR Executive', location: 'Hyderabad', dateOfJoining: new Date('2024-03-01'), employmentStatus: 'Active',
       employeeType: 'Full-time', gender: 'Female', dateOfBirth: new Date('1996-04-12'),
       emergencyContactName: 'Suresh Iyer', emergencyContactPhone: '9812345670', address: 'Banjara Hills, Hyderabad',
-      onboardingTasks: tasks(6),
+      onboardingTasks: tasks(6), profileStage: 'Locked', isLocked: true,
     },
   });
   const empKiran = await prisma.employee.create({
@@ -72,7 +72,7 @@ async function main() {
       userId: recruiter.id, employeeCode: 'EMP-002', name: 'Kiran Kumar', email: 'recruiter@teamlink.test',
       department: 'IT', designation: 'Recruiter', location: 'Hyderabad', dateOfJoining: new Date('2023-07-15'), employmentStatus: 'Active',
       employeeType: 'Full-time', gender: 'Male', dateOfBirth: new Date('1994-11-02'),
-      onboardingTasks: tasks(6),
+      onboardingTasks: tasks(6), profileStage: 'Locked', isLocked: true,
     },
   });
   const empDivya = await prisma.employee.create({
@@ -80,14 +80,18 @@ async function main() {
       userId: tl.id, employeeCode: 'EMP-003', name: 'Divya Rao', email: 'tl@teamlink.test',
       department: 'IT', designation: 'Team Lead', location: 'Bengaluru', dateOfJoining: new Date('2022-01-10'), employmentStatus: 'Active',
       employeeType: 'Full-time', gender: 'Female', dateOfBirth: new Date('1990-06-20'),
-      onboardingTasks: tasks(6),
+      onboardingTasks: tasks(6), profileStage: 'Locked', isLocked: true,
     },
+  });
+  const newJoinerUser = await prisma.user.create({
+    data: { name: 'Rahul Verma', email: 'rahul.verma@teamlink.test', passwordHash: password, role: 'EMPLOYEE' },
   });
   const empNewJoiner = await prisma.employee.create({
     data: {
-      employeeCode: 'EMP-004', name: 'Rahul Verma', department: 'IT', designation: 'Junior Developer',
-      location: 'Hyderabad', dateOfJoining: new Date(), employmentStatus: 'On Probation', employeeType: 'Full-time',
+      userId: newJoinerUser.id, employeeCode: 'EMP-004', name: 'Rahul Verma', email: 'rahul.verma@teamlink.test',
+      department: 'IT', designation: 'Junior Developer', dateOfJoining: new Date(), employmentStatus: 'On Probation',
       reportingManagerId: empDivya.id, onboardingTasks: tasks(3),
+      // Bare login only — profile deliberately unfilled to demo the employee fill-in → HR review → lock flow.
     },
   });
 

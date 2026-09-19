@@ -24,6 +24,25 @@ const DEFAULT_OFFBOARDING_TASKS = [
   'Full & final settlement processed', 'Experience letter issued',
 ];
 
+// Fields the employee fills in themselves after HR creates their bare login
+// (id/name/department/role/email/password). Department/designation/employmentStatus
+// stay HR-controlled even after the profile is unlocked.
+const SELF_SERVICE_FIELDS = {
+  phone: 'Phone', email: 'Email', dateOfBirth: 'Date of birth', gender: 'Gender', bloodGroup: 'Blood group',
+  addressType: 'Address type', addressLine1: 'Address line 1', addressLine2: 'Address line 2', city: 'City',
+  district: 'District', state: 'State', country: 'Country', postalCode: 'Postal code',
+  emergencyContactName: 'Emergency contact name', emergencyContactPhone: 'Emergency contact phone', emergencyContactRelation: 'Emergency contact relation',
+  branch: 'Branch', shift: 'Shift', employmentExperience: 'Employment type', educationDetails: 'Education details', skills: 'Skills & certifications',
+  bankName: 'Bank name', bankAccountNumber: 'Account number', ifscCode: 'IFSC code', panNumber: 'PAN number',
+  aadhaarNumber: 'Aadhaar number', uanNumber: 'UAN number', pfNumber: 'PF number', esiNumber: 'ESI number',
+};
+
+const UNLOCK_REQUEST_LIMIT = 3;
+const UNLOCK_REQUEST_REASONS = [
+  'Incorrect information entered', 'Address changed', 'Bank details need update',
+  'Contact number changed', 'Name correction needed', 'Other',
+];
+
 function completionPct(e) {
   const fields = [
     'name', 'department', 'designation', 'reportingManagerId', 'location', 'phone', 'email', 'dateOfJoining',
@@ -45,33 +64,58 @@ function withComputed(e) {
   };
 }
 
+router.get('/me/config', (req, res) => {
+  res.json({ unlockRequestLimit: UNLOCK_REQUEST_LIMIT, unlockRequestReasons: UNLOCK_REQUEST_REASONS });
+});
+
 router.get('/me', async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { userId: req.user.id }, include: { reportingManager: true } });
   if (!employee) return res.status(404).json({ error: 'No employee record linked to this account' });
   res.json(withComputed(employee));
 });
 
-// Employee self-service: submit profile-field changes for HR review rather than
-// applying them directly (phone/email/emergency contact/address only).
+// Employee self-service: fills in the rest of their own profile (everything HR
+// didn't set at login creation). Submits for HR review rather than applying
+// directly. Blocked once the profile is locked (post-approval) or already
+// awaiting a decision.
 router.put('/me', async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { userId: req.user.id } });
   if (!employee) return res.status(404).json({ error: 'No employee record linked to this account' });
+  if (employee.isLocked) return res.status(403).json({ error: 'Your profile is locked. Request edit access from HR to make further changes.' });
+  if (employee.pendingChanges) return res.status(409).json({ error: 'Your last submission is still awaiting HR review.' });
 
-  const editable = {
-    phone: 'Phone', email: 'Email', emergencyContactName: 'Emergency contact name', emergencyContactPhone: 'Emergency contact phone',
-    emergencyContactRelation: 'Emergency contact relation', address: 'Address', bloodGroup: 'Blood group',
-    bankName: 'Bank name', bankAccountNumber: 'Account number', ifscCode: 'IFSC code',
-  };
   const changes = [];
-  for (const [field, label] of Object.entries(editable)) {
+  for (const [field, label] of Object.entries(SELF_SERVICE_FIELDS)) {
     if (req.body[field] !== undefined && req.body[field] !== (employee[field] || '')) {
       changes.push({ field, label, from: employee[field] || '', to: req.body[field] });
     }
   }
   if (changes.length === 0) return res.status(400).json({ error: 'No changes to submit' });
 
-  const updated = await prisma.employee.update({ where: { id: employee.id }, data: { pendingChanges: JSON.stringify(changes) } });
-  await logAudit({ userId: req.user.id, action: 'Profile changes submitted for review', entity: 'Employee', entityId: employee.id });
+  const updated = await prisma.employee.update({
+    where: { id: employee.id },
+    data: { pendingChanges: JSON.stringify(changes), profileStage: 'Pending Review' },
+  });
+  await logAudit({ userId: req.user.id, action: 'Profile submitted for review', entity: 'Employee', entityId: employee.id });
+  res.json(withComputed(updated));
+});
+
+// Employee requests edit access back on a locked profile, capped at UNLOCK_REQUEST_LIMIT.
+router.post('/me/unlock-request', async (req, res) => {
+  const { reason } = req.body;
+  if (!reason || !UNLOCK_REQUEST_REASONS.includes(reason)) return res.status(400).json({ error: 'A valid reason is required' });
+  const employee = await prisma.employee.findUnique({ where: { userId: req.user.id } });
+  if (!employee) return res.status(404).json({ error: 'No employee record linked to this account' });
+  if (!employee.isLocked) return res.status(400).json({ error: 'Your profile is already editable' });
+  if (employee.unlockRequestStatus === 'Pending') return res.status(409).json({ error: 'You already have an edit request awaiting HR review' });
+  if (employee.unlockRequestCount >= UNLOCK_REQUEST_LIMIT) {
+    return res.status(403).json({ error: `You've reached the maximum of ${UNLOCK_REQUEST_LIMIT} edit requests. Please contact HR directly.` });
+  }
+  const updated = await prisma.employee.update({
+    where: { id: employee.id },
+    data: { unlockRequestReason: reason, unlockRequestStatus: 'Pending', unlockRequestCount: { increment: 1 } },
+  });
+  await logAudit({ userId: req.user.id, action: 'Edit access requested', entity: 'Employee', entityId: employee.id, toValue: reason });
   res.json(withComputed(updated));
 });
 
@@ -161,21 +205,41 @@ router.put('/:id/link-user', requireRole(...ADMIN_ROLES), async (req, res) => {
   res.json(withComputed(employee));
 });
 
-// Approve or reject an employee's self-submitted profile changes.
+// Approve or reject an employee's self-submitted profile changes. Approval
+// locks the profile — the employee can no longer self-edit until HR grants
+// an unlock request (see below).
 router.patch('/:id/changes/approve', requireRole(...HR_ROLES), async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
   if (!employee || !employee.pendingChanges) return res.status(400).json({ error: 'No pending changes' });
   const changes = JSON.parse(employee.pendingChanges);
-  const data = { pendingChanges: null };
+  const data = { pendingChanges: null, isLocked: true, profileStage: 'Locked' };
   changes.forEach((c) => { data[c.field] = c.to; });
   const updated = await prisma.employee.update({ where: { id: req.params.id }, data });
-  await logAudit({ userId: req.user.id, action: 'Profile changes approved', entity: 'Employee', entityId: employee.id });
+  await logAudit({ userId: req.user.id, action: 'Profile changes approved — profile locked', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(updated));
 });
 
 router.patch('/:id/changes/reject', requireRole(...HR_ROLES), async (req, res) => {
-  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { pendingChanges: null } });
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { pendingChanges: null, profileStage: 'Assigned' } });
   await logAudit({ userId: req.user.id, action: 'Profile changes sent back for edit', entity: 'Employee', entityId: employee.id });
+  res.json(withComputed(employee));
+});
+
+// HR decides an employee's request to unlock their (already-approved) profile.
+router.patch('/:id/unlock-request/approve', requireRole(...HR_ROLES), async (req, res) => {
+  const employee = await prisma.employee.findUnique({ where: { id: req.params.id } });
+  if (!employee || employee.unlockRequestStatus !== 'Pending') return res.status(400).json({ error: 'No pending unlock request' });
+  const updated = await prisma.employee.update({
+    where: { id: req.params.id },
+    data: { isLocked: false, unlockRequestStatus: 'Approved', profileStage: 'Assigned' },
+  });
+  await logAudit({ userId: req.user.id, action: 'Edit access granted', entity: 'Employee', entityId: employee.id });
+  res.json(withComputed(updated));
+});
+
+router.patch('/:id/unlock-request/reject', requireRole(...HR_ROLES), async (req, res) => {
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data: { unlockRequestStatus: 'Rejected' } });
+  await logAudit({ userId: req.user.id, action: 'Edit access request denied', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(employee));
 });
 

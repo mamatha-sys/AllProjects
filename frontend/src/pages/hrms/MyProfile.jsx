@@ -1,16 +1,36 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
 
+const emptyForm = {
+  phone: '', email: '', dateOfBirth: '', gender: '', bloodGroup: '',
+  addressType: '', addressLine1: '', addressLine2: '', city: '', district: '', state: '', country: '', postalCode: '',
+  emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelation: '',
+  branch: '', shift: '', employmentExperience: 'Fresher', educationDetails: '', skills: '',
+  bankName: '', bankAccountNumber: '', ifscCode: '', panNumber: '', aadhaarNumber: '', uanNumber: '', pfNumber: '', esiNumber: '',
+};
+
 export default function MyProfile() {
   const [employee, setEmployee] = useState(null);
+  const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ phone: '', email: '', emergencyContactName: '', emergencyContactPhone: '', address: '' });
+  const [form, setForm] = useState(emptyForm);
   const [message, setMessage] = useState('');
+  const [unlockReason, setUnlockReason] = useState('');
+  const [unlockMessage, setUnlockMessage] = useState('');
 
   function load() {
     api.get('/employees/me')
-      .then((res) => { setEmployee(res.data); setForm({ phone: res.data.phone || '', email: res.data.email || '', emergencyContactName: res.data.emergencyContactName || '', emergencyContactPhone: res.data.emergencyContactPhone || '', address: res.data.address || '' }); })
+      .then((res) => {
+        setEmployee(res.data);
+        const f = {};
+        Object.keys(emptyForm).forEach((k) => {
+          if (!res.data[k]) { f[k] = k === 'employmentExperience' ? 'Fresher' : ''; return; }
+          f[k] = k === 'dateOfBirth' ? String(res.data[k]).slice(0, 10) : res.data[k];
+        });
+        setForm(f);
+      })
       .catch(() => setError('No employee record linked to this account.'));
+    api.get('/employees/me/config').then((res) => setConfig(res.data));
   }
   useEffect(load, []);
 
@@ -22,34 +42,160 @@ export default function MyProfile() {
       setMessage('Submitted for HR review.');
       load();
     } catch (err) {
-      setMessage(err.response?.data?.error || 'No changes to submit.');
+      setMessage(err.response?.data?.error || 'Could not submit.');
+    }
+  }
+
+  async function requestUnlock(e) {
+    e.preventDefault();
+    setUnlockMessage('');
+    try {
+      await api.post('/employees/me/unlock-request', { reason: unlockReason });
+      setUnlockMessage('Edit access requested — awaiting HR review.');
+      setUnlockReason('');
+      load();
+    } catch (err) {
+      setUnlockMessage(err.response?.data?.error || 'Could not submit request.');
     }
   }
 
   if (error) return <div className="empty small-muted">{error}</div>;
-  if (!employee) return <div className="small-muted">Loading…</div>;
+  if (!employee || !config) return <div className="small-muted">Loading…</div>;
+
+  const awaitingReview = !!employee.pendingChanges;
+  const locked = employee.isLocked && !awaitingReview;
+  const editable = !employee.isLocked && !awaitingReview;
+  const requestsUsed = employee.unlockRequestCount || 0;
+  const requestsLeft = Math.max(0, config.unlockRequestLimit - requestsUsed);
 
   return (
     <div>
-      <div className="page-head"><div><h1>My Profile</h1><div className="page-sub">{employee.name} · {employee.employeeCode}</div></div></div>
+      <div className="page-head"><div><h1>My Profile</h1><div className="page-sub">{employee.name} · {employee.employeeCode} · {employee.department || 'No department yet'}</div></div></div>
 
-      {employee.pendingChanges && <div className="card section" style={{ borderColor: 'var(--warn)' }}><div className="small-muted">Your submitted changes are pending HR review.</div></div>}
-
-      <form className="card section" onSubmit={submit}>
-        <h3>Editable details</h3>
-        <div className="grid-2">
-          <label className="field"><span>Phone</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-          <label className="field"><span>Email</span><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-          <label className="field"><span>Emergency Contact Name</span><input value={form.emergencyContactName} onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })} /></label>
-          <label className="field"><span>Emergency Contact Phone</span><input value={form.emergencyContactPhone} onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })} /></label>
-          <label className="field"><span>Address</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
+      {awaitingReview && (
+        <div className="card section" style={{ borderColor: 'var(--warn)' }}>
+          <h3>Submitted — awaiting HR review</h3>
+          <div className="small-muted">You submitted the following changes. You can't edit further until HR approves or sends them back.</div>
+          {employee.pendingChanges.map((c, i) => (
+            <div className="kv" key={i}><span className="k">{c.label}</span><span>{c.from || '—'} → {c.to}</span></div>
+          ))}
         </div>
-        <button className="btn btn-primary btn-sm" type="submit">Submit for Review</button>
-        {message && <span className="small-muted" style={{ marginLeft: 10 }}>{message}</span>}
-      </form>
+      )}
+
+      {locked && (
+        <div className="card section">
+          <h3>Profile locked</h3>
+          <div className="small-muted" style={{ marginBottom: 10 }}>
+            Your profile was approved by HR and is now locked. To make further changes, request edit access below.
+            {' '}({requestsLeft} of {config.unlockRequestLimit} requests remaining)
+          </div>
+          {employee.unlockRequestStatus === 'Pending' ? (
+            <div className="status priority-medium">Edit access requested ({employee.unlockRequestReason}) — awaiting HR review</div>
+          ) : requestsLeft > 0 ? (
+            <form onSubmit={requestUnlock}>
+              <div className="grid-2">
+                <label className="field">
+                  <span>Reason for requesting edit access</span>
+                  <select required value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)}>
+                    <option value="">Select a reason</option>
+                    {config.unlockRequestReasons.map((r) => <option key={r}>{r}</option>)}
+                  </select>
+                </label>
+              </div>
+              <button className="btn btn-primary btn-sm" type="submit">Request Edit Access</button>
+              {unlockMessage && <span className="small-muted" style={{ marginLeft: 10 }}>{unlockMessage}</span>}
+            </form>
+          ) : (
+            <div className="error-text">You've used all {config.unlockRequestLimit} edit requests. Please contact HR directly.</div>
+          )}
+        </div>
+      )}
+
+      {editable && (
+        <form className="card section" onSubmit={submit}>
+          <h3>Personal Information</h3>
+          <div className="grid-2">
+            <label className="field"><span>Phone</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+            <label className="field"><span>Email</span><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+            <label className="field"><span>Date of Birth</span><input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} /></label>
+            <label className="field">
+              <span>Gender</span>
+              <select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
+                <option value="">Select</option><option>Male</option><option>Female</option><option>Other</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Blood Group</span>
+              <select value={form.bloodGroup} onChange={(e) => setForm({ ...form, bloodGroup: e.target.value })}>
+                <option value="">Select</option>
+                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => <option key={b}>{b}</option>)}
+              </select>
+            </label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Address</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Address Type</span>
+              <select value={form.addressType} onChange={(e) => setForm({ ...form, addressType: e.target.value })}>
+                <option value="">Select type</option><option>Current</option><option>Permanent</option>
+              </select>
+            </label>
+            <label className="field"><span>Address Line 1</span><input value={form.addressLine1} onChange={(e) => setForm({ ...form, addressLine1: e.target.value })} /></label>
+            <label className="field"><span>Address Line 2</span><input value={form.addressLine2} onChange={(e) => setForm({ ...form, addressLine2: e.target.value })} /></label>
+            <label className="field"><span>City / Town</span><input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></label>
+            <label className="field"><span>District</span><input value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></label>
+            <label className="field"><span>State / Province</span><input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></label>
+            <label className="field"><span>Country</span><input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></label>
+            <label className="field"><span>Postal Code</span><input value={form.postalCode} onChange={(e) => setForm({ ...form, postalCode: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Emergency Contact</h3>
+          <div className="grid-2">
+            <label className="field"><span>Name</span><input value={form.emergencyContactName} onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })} /></label>
+            <label className="field"><span>Relation</span><input value={form.emergencyContactRelation} onChange={(e) => setForm({ ...form, emergencyContactRelation: e.target.value })} /></label>
+            <label className="field"><span>Number</span><input value={form.emergencyContactPhone} onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Work Details</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Branch</span>
+              <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
+                <option value="">Select branch</option><option>Bengaluru</option><option>Chennai</option><option>Hyderabad</option>
+              </select>
+            </label>
+            <label className="field"><span>Shift</span><input value={form.shift} onChange={(e) => setForm({ ...form, shift: e.target.value })} /></label>
+            <label className="field">
+              <span>Employment Type</span>
+              <select value={form.employmentExperience} onChange={(e) => setForm({ ...form, employmentExperience: e.target.value })}>
+                <option>Fresher</option><option>Experienced</option>
+              </select>
+            </label>
+            <label className="field"><span>Education details</span><input value={form.educationDetails} onChange={(e) => setForm({ ...form, educationDetails: e.target.value })} /></label>
+            <label className="field"><span>Skills & certifications</span><input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Bank & Statutory Details</h3>
+          <div className="small-muted" style={{ marginBottom: 8 }}>Restricted — shown on payslips.</div>
+          <div className="grid-2">
+            <label className="field"><span>Bank name</span><input value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })} /></label>
+            <label className="field"><span>Account number</span><input value={form.bankAccountNumber} onChange={(e) => setForm({ ...form, bankAccountNumber: e.target.value })} /></label>
+            <label className="field"><span>IFSC code</span><input value={form.ifscCode} onChange={(e) => setForm({ ...form, ifscCode: e.target.value })} /></label>
+            <label className="field"><span>PAN number</span><input value={form.panNumber} onChange={(e) => setForm({ ...form, panNumber: e.target.value })} /></label>
+            <label className="field"><span>Aadhaar number</span><input value={form.aadhaarNumber} onChange={(e) => setForm({ ...form, aadhaarNumber: e.target.value })} /></label>
+            <label className="field"><span>UAN number</span><input value={form.uanNumber} onChange={(e) => setForm({ ...form, uanNumber: e.target.value })} /></label>
+            <label className="field"><span>PF number</span><input value={form.pfNumber} onChange={(e) => setForm({ ...form, pfNumber: e.target.value })} /></label>
+            <label className="field"><span>ESI number</span><input value={form.esiNumber} onChange={(e) => setForm({ ...form, esiNumber: e.target.value })} /></label>
+          </div>
+
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} type="submit">Submit for Review</button>
+          {message && <span className="small-muted" style={{ marginLeft: 10 }}>{message}</span>}
+        </form>
+      )}
 
       <div className="card">
-        <h3 style={{ fontSize: 13, marginBottom: 8 }}>Read-only details</h3>
+        <h3 style={{ fontSize: 13, marginBottom: 8 }}>Read-only details (set by HR)</h3>
         <div className="kv"><span className="k">Department</span><span>{employee.department || '—'}</span></div>
         <div className="kv"><span className="k">Designation</span><span>{employee.designation || '—'}</span></div>
         <div className="kv"><span className="k">Reporting Manager</span><span>{employee.reportingManager?.name || '—'}</span></div>
