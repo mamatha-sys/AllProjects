@@ -1,7 +1,13 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const prisma = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
+
+const ROLE_BY_DESIGNATION = {
+  'Super Admin': 'SUPER_ADMIN', 'HR Admin': 'ADMIN', 'Manager': 'MANAGER', 'Assistant Manager': 'ASSISTANT_MANAGER',
+  'Senior Team Lead (STL)': 'STL', 'Team Lead (TL)': 'TL', 'Employee (Self-Service)': 'EMPLOYEE', 'Accountant': 'ACCOUNTANT',
+};
 
 const router = express.Router();
 router.use(requireAuth);
@@ -19,7 +25,12 @@ const DEFAULT_OFFBOARDING_TASKS = [
 ];
 
 function completionPct(e) {
-  const fields = ['name', 'department', 'designation', 'reportingManagerId', 'location', 'phone', 'email', 'dateOfJoining'];
+  const fields = [
+    'name', 'department', 'designation', 'reportingManagerId', 'location', 'phone', 'email', 'dateOfJoining',
+    'dateOfBirth', 'gender', 'bloodGroup', 'addressLine1', 'city', 'state', 'postalCode',
+    'emergencyContactName', 'emergencyContactPhone', 'branch', 'bankName', 'bankAccountNumber', 'ifscCode',
+    'panNumber', 'aadhaarNumber', 'educationDetails', 'skills',
+  ];
   const filled = fields.filter((f) => e[f]).length;
   return Math.round((filled / fields.length) * 100);
 }
@@ -46,7 +57,11 @@ router.put('/me', async (req, res) => {
   const employee = await prisma.employee.findUnique({ where: { userId: req.user.id } });
   if (!employee) return res.status(404).json({ error: 'No employee record linked to this account' });
 
-  const editable = { phone: 'Phone', email: 'Email', emergencyContactName: 'Emergency contact name', emergencyContactPhone: 'Emergency contact phone', address: 'Address' };
+  const editable = {
+    phone: 'Phone', email: 'Email', emergencyContactName: 'Emergency contact name', emergencyContactPhone: 'Emergency contact phone',
+    emergencyContactRelation: 'Emergency contact relation', address: 'Address', bloodGroup: 'Blood group',
+    bankName: 'Bank name', bankAccountNumber: 'Account number', ifscCode: 'IFSC code',
+  };
   const changes = [];
   for (const [field, label] of Object.entries(editable)) {
     if (req.body[field] !== undefined && req.body[field] !== (employee[field] || '')) {
@@ -87,27 +102,48 @@ router.get('/:id', async (req, res) => {
   res.json(withComputed(employee));
 });
 
+// Creates the employee record and — when a role + password are supplied — their
+// login account together, in one step (matching the reference app's combined flow).
 router.post('/', requireRole(...HR_ROLES), async (req, res) => {
-  const { employeeCode, name, email, phone, department, designation, location, dateOfJoining, dateOfBirth, gender, employeeType } = req.body;
-  if (!employeeCode || !name) return res.status(400).json({ error: 'employeeCode and name are required' });
+  let { employeeCode } = req.body;
+  const { name, email, phone, department, designation, location, dateOfJoining, dateOfBirth, gender, employeeType, role, password, branch } = req.body;
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!employeeCode) {
+    const count = await prisma.employee.count();
+    employeeCode = 'EMP-' + String(count + 1).padStart(4, '0');
+  }
+
+  let userId = null;
+  if (role && password) {
+    if (!email) return res.status(400).json({ error: 'email is required to create a login account' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({ data: { name, email, passwordHash, role } });
+    userId = user.id;
+  }
+
   const employee = await prisma.employee.create({
     data: {
-      employeeCode, name, email, phone, department, designation, location, gender, employeeType,
+      employeeCode, name, email, phone, department, designation, location, gender, employeeType, branch, userId,
       dateOfJoining: dateOfJoining ? new Date(dateOfJoining) : null,
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
       onboardingTasks: JSON.stringify(DEFAULT_ONBOARDING_TASKS.map((task) => ({ task, completed: false }))),
     },
   });
-  await logAudit({ userId: req.user.id, action: 'Employee created', entity: 'Employee', entityId: employee.id });
+  await logAudit({ userId: req.user.id, action: 'Employee created' + (userId ? ' with login account' : ''), entity: 'Employee', entityId: employee.id });
   res.status(201).json(withComputed(employee));
 });
 
 router.put('/:id', requireRole(...HR_ROLES), async (req, res) => {
-  const { name, email, phone, department, designation, location, employmentStatus, employeeType, emergencyContactName, emergencyContactPhone, address } = req.body;
-  const employee = await prisma.employee.update({
-    where: { id: req.params.id },
-    data: { name, email, phone, department, designation, location, employmentStatus, employeeType, emergencyContactName, emergencyContactPhone, address },
-  });
+  const editableFields = [
+    'name', 'email', 'phone', 'department', 'designation', 'location', 'employmentStatus', 'employeeType',
+    'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'address', 'addressType',
+    'addressLine1', 'addressLine2', 'city', 'district', 'state', 'country', 'postalCode', 'bloodGroup',
+    'branch', 'shift', 'employmentExperience', 'educationDetails', 'skills',
+    'bankName', 'bankAccountNumber', 'ifscCode', 'panNumber', 'aadhaarNumber', 'uanNumber', 'pfNumber', 'esiNumber',
+  ];
+  const data = {};
+  editableFields.forEach((f) => { if (req.body[f] !== undefined) data[f] = req.body[f]; });
+  const employee = await prisma.employee.update({ where: { id: req.params.id }, data });
   await logAudit({ userId: req.user.id, action: 'Employee updated', entity: 'Employee', entityId: employee.id });
   res.json(withComputed(employee));
 });

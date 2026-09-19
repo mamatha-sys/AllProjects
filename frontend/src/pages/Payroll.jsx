@@ -6,20 +6,29 @@ import TabsPage from '../components/TabsPage.jsx';
 const PAYROLL_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 const inr = (n) => `₹${Math.round(n || 0).toLocaleString('en-IN')}`;
 
-function DashboardTab({ canRun }) {
+function DashboardTab({ canRun, isAdmin }) {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [defaultCTC, setDefaultCTC] = useState(600000);
   const [message, setMessage] = useState('');
   const [fnf, setFnf] = useState([]);
   const [policy, setPolicy] = useState(null);
+  const [reference, setReference] = useState(null);
+  const [showCtcSettings, setShowCtcSettings] = useState(false);
 
   function load() {
     if (canRun) {
       api.get('/payroll/fnf').then((res) => setFnf(res.data));
       api.get('/payroll/policy').then((res) => setPolicy(res.data));
+      api.get('/payroll/reference-structure?ctc=300000').then((res) => setReference(res.data));
     }
   }
   useEffect(load, [canRun]);
+
+  async function saveCtcSettings(patch) {
+    const res = await api.put('/payroll/ctc-settings', patch);
+    setPolicy(res.data);
+    api.get('/payroll/reference-structure?ctc=300000').then((r) => setReference(r.data));
+  }
 
   async function runPayroll(e) {
     e.preventDefault();
@@ -49,6 +58,43 @@ function DashboardTab({ canRun }) {
         <div className="statitem"><div className="n">{month}</div><div className="l">Payroll Cycle</div></div>
         <div className="statitem"><div className="n">{fnf.filter((f) => f.status === 'Pending').length}</div><div className="l">F&F Requests</div></div>
       </div>
+
+      {reference && (
+        <div className="card section">
+          <h3>Salary Structure — Standard Package reference (₹3,00,000 CTC example)</h3>
+          <div className="grid-2">
+            <div>
+              <div className="small-muted" style={{ fontWeight: 700, marginBottom: 4 }}>EARNINGS</div>
+              <div className="kv"><span className="k">Basic</span><span>{inr(reference.basic)}</span></div>
+              <div className="kv"><span className="k">HRA</span><span>{inr(reference.hra)}</span></div>
+              <div className="kv"><span className="k">Bonus</span><span>{inr(reference.bonus)}</span></div>
+              <div className="kv"><span className="k">Special Allowance</span><span>{inr(reference.special)}</span></div>
+              <div className="kv"><span className="k"><b>Gross</b></span><span><b>{inr(reference.gross)}</b></span></div>
+            </div>
+            <div>
+              <div className="small-muted" style={{ fontWeight: 700, marginBottom: 4 }}>DEDUCTIONS</div>
+              <div className="kv"><span className="k">PF (Provident Fund)</span><span>−{inr(reference.employeePf)}</span></div>
+              <div className="kv"><span className="k">PT (Professional Tax)</span><span>−{inr(reference.professionalTax)}</span></div>
+              <div className="kv"><span className="k"><b>Net Pay</b></span><span><b>{inr(reference.net)}</b></span></div>
+              <div className="small-muted" style={{ fontWeight: 700, margin: '8px 0 4px' }}>EMPLOYER COST</div>
+              <div className="kv"><span className="k">Employer PF</span><span>{inr(reference.employerPf)}</span></div>
+              <div className="kv"><span className="k">Gratuity</span><span>{inr(reference.gratuity)}</span></div>
+            </div>
+          </div>
+          {isAdmin && <button className="btn btn-sm" style={{ marginTop: 10 }} onClick={() => setShowCtcSettings((s) => !s)}>{showCtcSettings ? 'Hide' : 'Configure'} CTC Split Settings</button>}
+          {showCtcSettings && policy && (
+            <div className="grid-2" style={{ marginTop: 10 }}>
+              <label className="field"><span>Basic % of CTC</span><input type="number" value={policy.basicPctOfCtc} onChange={(e) => saveCtcSettings({ basicPctOfCtc: e.target.value })} /></label>
+              <label className="field"><span>HRA % of Basic</span><input type="number" value={policy.hraPctOfBasic} onChange={(e) => saveCtcSettings({ hraPctOfBasic: e.target.value })} /></label>
+              <label className="field"><span>Bonus % of Basic</span><input type="number" value={policy.bonusPctOfBasic} onChange={(e) => saveCtcSettings({ bonusPctOfBasic: e.target.value })} /></label>
+              <label className="field"><span>Employee PF % of Basic</span><input type="number" value={policy.employeePfPctOfBasic} onChange={(e) => saveCtcSettings({ employeePfPctOfBasic: e.target.value })} /></label>
+              <label className="field"><span>Employer PF % of Basic</span><input type="number" value={policy.employerPfPctOfBasic} onChange={(e) => saveCtcSettings({ employerPfPctOfBasic: e.target.value })} /></label>
+              <label className="field"><span>Gratuity % of Basic</span><input type="number" value={policy.gratuityPctOfBasic} onChange={(e) => saveCtcSettings({ gratuityPctOfBasic: e.target.value })} /></label>
+              <label className="field"><span>Professional Tax (flat monthly)</span><input type="number" value={policy.professionalTaxFlat} onChange={(e) => saveCtcSettings({ professionalTaxFlat: e.target.value })} /></label>
+            </div>
+          )}
+        </div>
+      )}
 
       <form className="card section" onSubmit={runPayroll}>
         <h3>Run payroll cycle</h3>
@@ -191,13 +237,14 @@ function PayslipsTab({ canRun }) {
 export default function Payroll() {
   const { user } = useAuth();
   const canRun = PAYROLL_ROLES.includes(user?.role);
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
 
   return (
     <TabsPage
       title="Payroll & Compensation"
       subtitle="Pay runs, salary structures, settlements and payslips"
       tabs={[
-        { key: 'dashboard', label: 'Dashboard', element: <DashboardTab canRun={canRun} /> },
+        { key: 'dashboard', label: 'Dashboard', element: <DashboardTab canRun={canRun} isAdmin={isAdmin} /> },
         { key: 'structure', label: 'Salary Structure', element: <StructureTab canRun={canRun} /> },
         { key: 'payslips', label: 'Payslips', element: <PayslipsTab canRun={canRun} /> },
       ]}

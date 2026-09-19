@@ -5,16 +5,41 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
+const EDIT_FIELDS = [
+  'name', 'email', 'phone', 'department', 'designation', 'location', 'employmentStatus', 'employeeType',
+  'emergencyContactName', 'emergencyContactPhone', 'emergencyContactRelation', 'addressType',
+  'addressLine1', 'addressLine2', 'city', 'district', 'state', 'country', 'postalCode', 'bloodGroup',
+  'branch', 'shift', 'employmentExperience', 'educationDetails', 'skills',
+  'bankName', 'bankAccountNumber', 'ifscCode', 'panNumber', 'aadhaarNumber', 'uanNumber', 'pfNumber', 'esiNumber',
+];
+
 export default function EmployeeDetail() {
   const { id } = useParams();
   const { user } = useAuth();
   const isHR = HR_ROLES.includes(user?.role);
+  const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
   const [employee, setEmployee] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({});
 
   function load() {
     api.get(`/employees/${id}`).then((res) => setEmployee(res.data));
   }
   useEffect(load, [id]);
+
+  function startEdit() {
+    const f = {};
+    EDIT_FIELDS.forEach((k) => { f[k] = employee[k] || ''; });
+    setForm(f);
+    setEditing(true);
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    await api.put(`/employees/${id}`, form);
+    setEditing(false);
+    load();
+  }
 
   async function toggleOnboarding(index) {
     await api.patch(`/employees/${id}/onboarding/${index}`);
@@ -48,7 +73,10 @@ export default function EmployeeDetail() {
       <Link className="small-muted" to="/employees">← Back to employees</Link>
       <div className="page-head" style={{ marginTop: 10 }}>
         <h1>{employee.name}</h1>
-        <span className={`status ${employee.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(employee.employmentStatus) ? 'priority-high' : ''}`}>{employee.employmentStatus}</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span className={`status ${employee.employmentStatus === 'Active' ? 'priority-low' : ['Exited', 'Relieved'].includes(employee.employmentStatus) ? 'priority-high' : ''}`}>{employee.employmentStatus}</span>
+          {isHR && !editing && <button className="btn btn-sm" onClick={startEdit}>Edit</button>}
+        </div>
       </div>
 
       {employee.pendingChanges && (
@@ -66,29 +94,134 @@ export default function EmployeeDetail() {
         </div>
       )}
 
-      <div className="two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Profile — {employee.profileCompletionPct}% complete</h3>
-          <div className="kv"><span className="k">Employee Code</span><span>{employee.employeeCode}</span></div>
-          <div className="kv"><span className="k">Email</span><span>{employee.email || '—'}</span></div>
-          <div className="kv"><span className="k">Phone</span><span>{employee.phone || '—'}</span></div>
-          <div className="kv"><span className="k">Department</span><span>{employee.department || '—'}</span></div>
-          <div className="kv"><span className="k">Designation</span><span>{employee.designation || '—'}</span></div>
-          <div className="kv"><span className="k">Location</span><span>{employee.location || '—'}</span></div>
-          <div className="kv"><span className="k">Employee Type</span><span>{employee.employeeType || '—'}</span></div>
-          <div className="kv"><span className="k">Gender</span><span>{employee.gender || '—'}</span></div>
-          <div className="kv"><span className="k">Date of Birth</span><span>{employee.dateOfBirth ? new Date(employee.dateOfBirth).toLocaleDateString() : '—'}</span></div>
-          <div className="kv"><span className="k">Date of Joining</span><span>{employee.dateOfJoining ? new Date(employee.dateOfJoining).toLocaleDateString() : '—'}</span></div>
-          <div className="kv"><span className="k">Reporting Manager</span><span>{employee.reportingManager?.name || '—'}</span></div>
-        </div>
+      {editing ? (
+        <form className="card section" onSubmit={saveEdit}>
+          <h3>Personal Information</h3>
+          <div className="grid-2">
+            <label className="field"><span>Full name</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+            <label className="field"><span>Phone</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+            <label className="field"><span>Email</span><input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+            <label className="field">
+              <span>Blood Group</span>
+              <select value={form.bloodGroup} onChange={(e) => setForm({ ...form, bloodGroup: e.target.value })}>
+                <option value="">Select</option>
+                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((b) => <option key={b}>{b}</option>)}
+              </select>
+            </label>
+          </div>
 
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Emergency & login</h3>
-          <div className="kv"><span className="k">Emergency Contact</span><span>{employee.emergencyContactName || '—'} {employee.emergencyContactPhone ? `(${employee.emergencyContactPhone})` : ''}</span></div>
-          <div className="kv"><span className="k">Address</span><span>{employee.address || '—'}</span></div>
-          <div className="kv"><span className="k">Login Account</span><span>{employee.user ? `${employee.user.name} · ${employee.user.role}` : 'Not linked'}</span></div>
+          <h3 style={{ marginTop: 14 }}>Address</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Address Type</span>
+              <select value={form.addressType} onChange={(e) => setForm({ ...form, addressType: e.target.value })}>
+                <option value="">Select type</option><option>Current</option><option>Permanent</option>
+              </select>
+            </label>
+            <label className="field"><span>Address Line 1</span><input value={form.addressLine1} onChange={(e) => setForm({ ...form, addressLine1: e.target.value })} /></label>
+            <label className="field"><span>Address Line 2</span><input value={form.addressLine2} onChange={(e) => setForm({ ...form, addressLine2: e.target.value })} /></label>
+            <label className="field"><span>City / Town</span><input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></label>
+            <label className="field"><span>District</span><input value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></label>
+            <label className="field"><span>State / Province</span><input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></label>
+            <label className="field"><span>Country</span><input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></label>
+            <label className="field"><span>Postal Code</span><input value={form.postalCode} onChange={(e) => setForm({ ...form, postalCode: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Emergency Contact</h3>
+          <div className="grid-2">
+            <label className="field"><span>Name</span><input value={form.emergencyContactName} onChange={(e) => setForm({ ...form, emergencyContactName: e.target.value })} /></label>
+            <label className="field"><span>Relation</span><input value={form.emergencyContactRelation} onChange={(e) => setForm({ ...form, emergencyContactRelation: e.target.value })} /></label>
+            <label className="field"><span>Number</span><input value={form.emergencyContactPhone} onChange={(e) => setForm({ ...form, emergencyContactPhone: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Employment Details</h3>
+          <div className="grid-2">
+            <label className="field"><span>Department</span><input value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} /></label>
+            <label className="field">
+              <span>Branch</span>
+              <select value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
+                <option value="">Select branch</option><option>Bengaluru</option><option>Chennai</option><option>Hyderabad</option>
+              </select>
+            </label>
+            <label className="field"><span>Designation</span><input value={form.designation} onChange={(e) => setForm({ ...form, designation: e.target.value })} /></label>
+            <label className="field"><span>Location</span><input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></label>
+            <label className="field"><span>Shift</span><input value={form.shift} onChange={(e) => setForm({ ...form, shift: e.target.value })} /></label>
+            {isAdmin && (
+              <label className="field">
+                <span>Status</span>
+                <select value={form.employmentStatus} onChange={(e) => setForm({ ...form, employmentStatus: e.target.value })}>
+                  {['Active', 'On Probation', 'Notice Period', 'Exit Process', 'Relieved', 'Exited'].map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Bank & Statutory Details</h3>
+          <div className="small-muted" style={{ marginBottom: 8 }}>Restricted — shown on payslips.</div>
+          <div className="grid-2">
+            <label className="field"><span>Bank name</span><input value={form.bankName} onChange={(e) => setForm({ ...form, bankName: e.target.value })} /></label>
+            <label className="field"><span>Account number</span><input value={form.bankAccountNumber} onChange={(e) => setForm({ ...form, bankAccountNumber: e.target.value })} /></label>
+            <label className="field"><span>IFSC code</span><input value={form.ifscCode} onChange={(e) => setForm({ ...form, ifscCode: e.target.value })} /></label>
+            <label className="field"><span>PAN number</span><input value={form.panNumber} onChange={(e) => setForm({ ...form, panNumber: e.target.value })} /></label>
+            <label className="field"><span>Aadhaar number</span><input value={form.aadhaarNumber} onChange={(e) => setForm({ ...form, aadhaarNumber: e.target.value })} /></label>
+            <label className="field"><span>UAN number</span><input value={form.uanNumber} onChange={(e) => setForm({ ...form, uanNumber: e.target.value })} /></label>
+            <label className="field"><span>PF number</span><input value={form.pfNumber} onChange={(e) => setForm({ ...form, pfNumber: e.target.value })} /></label>
+            <label className="field"><span>ESI number</span><input value={form.esiNumber} onChange={(e) => setForm({ ...form, esiNumber: e.target.value })} /></label>
+          </div>
+
+          <h3 style={{ marginTop: 14 }}>Education & Work Experience</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Employment Type</span>
+              <select value={form.employmentExperience} onChange={(e) => setForm({ ...form, employmentExperience: e.target.value })}>
+                <option>Fresher</option><option>Experienced</option>
+              </select>
+            </label>
+            <label className="field"><span>Education details</span><input value={form.educationDetails} onChange={(e) => setForm({ ...form, educationDetails: e.target.value })} /></label>
+            <label className="field"><span>Skills & certifications</span><input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} /></label>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <button className="btn btn-primary btn-sm" type="submit">Save changes</button>{' '}
+            <button className="btn btn-sm" type="button" onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <div className="two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div className="card">
+            <h3 style={{ fontSize: 13, marginBottom: 8 }}>Profile — {employee.profileCompletionPct}% complete</h3>
+            <div className="kv"><span className="k">Employee Code</span><span>{employee.employeeCode}</span></div>
+            <div className="kv"><span className="k">Email</span><span>{employee.email || '—'}</span></div>
+            <div className="kv"><span className="k">Phone</span><span>{employee.phone || '—'}</span></div>
+            <div className="kv"><span className="k">Department</span><span>{employee.department || '—'}</span></div>
+            <div className="kv"><span className="k">Branch</span><span>{employee.branch || '—'}</span></div>
+            <div className="kv"><span className="k">Designation</span><span>{employee.designation || '—'}</span></div>
+            <div className="kv"><span className="k">Shift</span><span>{employee.shift || '—'}</span></div>
+            <div className="kv"><span className="k">Employee Type</span><span>{employee.employeeType || '—'}</span></div>
+            <div className="kv"><span className="k">Gender</span><span>{employee.gender || '—'}</span></div>
+            <div className="kv"><span className="k">Blood Group</span><span>{employee.bloodGroup || '—'}</span></div>
+            <div className="kv"><span className="k">Date of Joining</span><span>{employee.dateOfJoining ? new Date(employee.dateOfJoining).toLocaleDateString() : '—'}</span></div>
+            <div className="kv"><span className="k">Reporting Manager</span><span>{employee.reportingManager?.name || '—'}</span></div>
+          </div>
+
+          <div className="card">
+            <h3 style={{ fontSize: 13, marginBottom: 8 }}>Address & Emergency Contact</h3>
+            <div className="kv"><span className="k">Address</span><span>{[employee.addressLine1, employee.city, employee.state, employee.postalCode].filter(Boolean).join(', ') || employee.address || '—'}</span></div>
+            <div className="kv"><span className="k">Emergency Contact</span><span>{employee.emergencyContactName || '—'} {employee.emergencyContactRelation ? `(${employee.emergencyContactRelation})` : ''} {employee.emergencyContactPhone ? `— ${employee.emergencyContactPhone}` : ''}</span></div>
+            <div className="kv"><span className="k">Login Account</span><span>{employee.user ? `${employee.user.name} · ${employee.user.role}` : 'Not linked'}</span></div>
+
+            <h3 style={{ fontSize: 13, margin: '14px 0 8px' }}>Bank & Statutory <span className="small-muted">(restricted)</span></h3>
+            <div className="kv"><span className="k">Bank</span><span>{employee.bankName ? `${employee.bankName} · ${employee.bankAccountNumber || '—'}` : '—'}</span></div>
+            <div className="kv"><span className="k">PAN</span><span>{employee.panNumber || '—'}</span></div>
+            <div className="kv"><span className="k">UAN / PF / ESI</span><span>{employee.uanNumber || '—'} / {employee.pfNumber || '—'} / {employee.esiNumber || '—'}</span></div>
+
+            <h3 style={{ fontSize: 13, margin: '14px 0 8px' }}>Education & Experience</h3>
+            <div className="kv"><span className="k">Employment Type</span><span>{employee.employmentExperience || '—'}</span></div>
+            <div className="kv"><span className="k">Education</span><span>{employee.educationDetails || '—'}</span></div>
+            <div className="kv"><span className="k">Skills</span><span>{employee.skills || '—'}</span></div>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="card section">
         <h3>Onboarding checklist — {onboardingPct}%</h3>

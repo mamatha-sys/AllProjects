@@ -22,16 +22,42 @@ router.get('/', async (req, res) => {
   res.json(leave);
 });
 
+// Blocks a new application if too much of the employee's department would be on
+// leave for the same dates at once — whichever cap (% or flat headcount) is
+// stricter wins, matching the reference app's Concurrent Leave Cap policy.
+async function wouldExceedConcurrentCap(employee, fromDate, toDate) {
+  if (!employee.department) return null;
+  const cfg = await prisma.hrConfig.findFirst();
+  if (!cfg) return null;
+  const deptSize = await prisma.employee.count({ where: { department: employee.department, employmentStatus: { not: 'Relieved' } } });
+  if (!deptSize) return null;
+  const overlapping = await prisma.leaveRequest.findMany({
+    where: { status: { in: ['Approved', 'Pending'] }, fromDate: { lte: toDate }, toDate: { gte: fromDate }, employee: { department: employee.department } },
+  });
+  const projected = overlapping.length + 1;
+  const pctCap = Math.floor((deptSize * cfg.concurrentLeaveCapPct) / 100);
+  const cap = Math.min(pctCap || deptSize, cfg.concurrentLeaveCapFlat || deptSize);
+  if (projected > cap) return `This would put ${projected} of ${deptSize} ${employee.department} employees on leave at once (cap: ${cap}).`;
+  return null;
+}
+
 router.post('/', async (req, res) => {
   const { type, fromDate, toDate, reason } = req.body;
   let employeeId = req.body.employeeId;
+  let employee;
   if (req.user.role === 'EMPLOYEE') {
-    const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });
-    if (!own) return res.status(404).json({ error: 'No employee record linked to this account' });
-    employeeId = own.id;
+    employee = await prisma.employee.findUnique({ where: { userId: req.user.id } });
+    if (!employee) return res.status(404).json({ error: 'No employee record linked to this account' });
+    employeeId = employee.id;
+  } else if (employeeId) {
+    employee = await prisma.employee.findUnique({ where: { id: employeeId } });
   }
   if (!employeeId || !type || !fromDate || !toDate) {
     return res.status(400).json({ error: 'employeeId, type, fromDate and toDate are required' });
+  }
+  if (employee) {
+    const capError = await wouldExceedConcurrentCap(employee, fromDate, toDate);
+    if (capError) return res.status(409).json({ error: capError });
   }
   const leave = await prisma.leaveRequest.create({ data: { employeeId, type, fromDate, toDate, reason } });
   await logAudit({ userId: req.user.id, action: 'Leave requested', entity: 'LeaveRequest', entityId: leave.id });
@@ -98,6 +124,28 @@ router.put('/reasons/:id', requireRole(...POLICY_ROLES), async (req, res) => {
   const { active } = req.body;
   const reason = await prisma.leaveReason.update({ where: { id: req.params.id }, data: { active } });
   res.json(reason);
+});
+
+router.get('/concurrency-policy', async (req, res) => {
+  let cfg = await prisma.hrConfig.findFirst();
+  if (!cfg) cfg = await prisma.hrConfig.create({ data: {} });
+  res.json({ concurrentLeaveCapPct: cfg.concurrentLeaveCapPct, concurrentLeaveCapFlat: cfg.concurrentLeaveCapFlat, leaveReasonThresholdDays: cfg.leaveReasonThresholdDays });
+});
+
+router.put('/concurrency-policy', requireRole(...POLICY_ROLES), async (req, res) => {
+  const { concurrentLeaveCapPct, concurrentLeaveCapFlat, leaveReasonThresholdDays } = req.body;
+  let cfg = await prisma.hrConfig.findFirst();
+  if (!cfg) cfg = await prisma.hrConfig.create({ data: {} });
+  const updated = await prisma.hrConfig.update({
+    where: { id: cfg.id },
+    data: {
+      concurrentLeaveCapPct: concurrentLeaveCapPct != null ? Number(concurrentLeaveCapPct) : undefined,
+      concurrentLeaveCapFlat: concurrentLeaveCapFlat != null ? Number(concurrentLeaveCapFlat) : undefined,
+      leaveReasonThresholdDays: leaveReasonThresholdDays != null ? Number(leaveReasonThresholdDays) : undefined,
+    },
+  });
+  await logAudit({ userId: req.user.id, action: 'Leave concurrency policy updated', entity: 'HrConfig', entityId: updated.id });
+  res.json(updated);
 });
 
 router.get('/holidays', async (req, res) => {

@@ -8,19 +8,32 @@ const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL',
 function DashboardTab({ isHR, canEditPolicy }) {
   const [requests, setRequests] = useState([]);
   const [types, setTypes] = useState([]);
+  const [caps, setCaps] = useState(null);
   const [form, setForm] = useState({ type: '', fromDate: '', toDate: '', reason: '' });
+  const [error, setError] = useState('');
 
   function load() {
     api.get('/leave').then((res) => setRequests(res.data));
     api.get('/leave/types').then((res) => setTypes(res.data));
+    api.get('/leave/concurrency-policy').then((res) => setCaps(res.data));
   }
   useEffect(load, []);
 
   async function submitLeave(e) {
     e.preventDefault();
-    await api.post('/leave', form);
-    setForm({ type: '', fromDate: '', toDate: '', reason: '' });
-    load();
+    setError('');
+    try {
+      await api.post('/leave', form);
+      setForm({ type: '', fromDate: '', toDate: '', reason: '' });
+      load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not submit request');
+    }
+  }
+
+  async function saveCaps(patch) {
+    const res = await api.put('/leave/concurrency-policy', patch);
+    setCaps(res.data);
   }
 
   async function decide(id, status) {
@@ -77,8 +90,14 @@ function DashboardTab({ isHR, canEditPolicy }) {
           <label className="field"><span>To</span><input type="date" required value={form.toDate} onChange={(e) => setForm({ ...form, toDate: e.target.value })} /></label>
           <label className="field"><span>Reason</span><input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></label>
         </div>
+        {error && <div className="error-text">{error}</div>}
         <button className="btn btn-primary btn-sm" type="submit">Submit request</button>
       </form>
+
+      <div className="card section">
+        <h3>Leave Approval Chain</h3>
+        <div className="small-muted">Team Lead (TL) → Assistant Manager → Super Admin</div>
+      </div>
 
       <div className="card section">
         <h3>Leave Types & Policy</h3>
@@ -92,6 +111,24 @@ function DashboardTab({ isHR, canEditPolicy }) {
             </span>
           </div>
         ))}
+        {caps && (
+          <>
+            <div className="kv">
+              <span className="k">Concurrent Leave Cap <span className="small-muted">— max % of a department on leave at once</span></span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <b>{caps.concurrentLeaveCapPct}%</b>
+                {canEditPolicy && <button className="btn btn-sm" onClick={() => { const v = prompt('Concurrent leave cap (%)', caps.concurrentLeaveCapPct); if (v !== null) saveCaps({ concurrentLeaveCapPct: Number(v) || 0 }); }}>Edit</button>}
+              </span>
+            </div>
+            <div className="kv">
+              <span className="k">Concurrent Leave Cap — Flat Headcount</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <b>{caps.concurrentLeaveCapFlat}</b>
+                {canEditPolicy && <button className="btn btn-sm" onClick={() => { const v = prompt('Flat headcount cap', caps.concurrentLeaveCapFlat); if (v !== null) saveCaps({ concurrentLeaveCapFlat: Number(v) || 0 }); }}>Edit</button>}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="tbl-wrap">

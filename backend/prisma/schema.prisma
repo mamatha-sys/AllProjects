@@ -129,7 +129,30 @@ model Employee {
   gender            String?
   emergencyContactName  String?
   emergencyContactPhone String?
+  emergencyContactRelation String?
   address           String?
+  addressType       String?  // Current | Permanent
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  district          String?
+  state             String?
+  country           String?
+  postalCode        String?
+  bloodGroup        String?
+  branch            String?  // office location: Bengaluru | Chennai | Hyderabad, etc.
+  shift             String?  @default("General (9:00 AM – 6:00 PM)")
+  employmentExperience String? @default("Fresher") // Fresher | Experienced
+  educationDetails  String?
+  skills            String?
+  bankName          String?
+  bankAccountNumber String?
+  ifscCode          String?
+  panNumber         String?
+  aadhaarNumber     String?
+  uanNumber         String?
+  pfNumber          String?
+  esiNumber         String?
   onboardingTasks   String?  // JSON array of {task, completed}
   offboardingStatus String?  // null | Serving Notice | Cleared
   offboardingTasks  String?  // JSON array of {task, completed}
@@ -463,6 +486,22 @@ model HrConfig {
   unmarkedDaysUnpaid            Boolean @default(true)
   weekendsPaid                  Boolean @default(true)
   paidLeaveDaysPerMonth         Int    @default(1)
+  // CTC split settings — how every employee's CTC is broken into components.
+  // Special Allowance always absorbs whatever's left over so the pieces
+  // reconcile exactly back to CTC.
+  basicPctOfCtc                 Float  @default(50)
+  hraPctOfBasic                 Float  @default(40)
+  bonusPctOfBasic               Float  @default(8.33)
+  employeePfPctOfBasic          Float  @default(12)
+  employerPfPctOfBasic          Float  @default(12)
+  employeePfMonthlyCap          Float  @default(1800)
+  employerPfMonthlyCap          Float  @default(1800)
+  gratuityPctOfBasic            Float  @default(4.81)
+  professionalTaxFlat           Float  @default(200)
+  // Leave policy — concurrent leave caps
+  concurrentLeaveCapPct         Int    @default(30)
+  concurrentLeaveCapFlat        Int    @default(2)
+  leaveReasonThresholdDays      Int    @default(4)
 }
 
 // =============================================================================

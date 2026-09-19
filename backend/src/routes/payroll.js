@@ -8,20 +8,26 @@ router.use(requireAuth);
 
 const PAYROLL_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 
-// Standard Indian-payroll CTC breakup: Basic 50% of CTC, HRA 40% of Basic,
-// statutory bonus 8.33% of Basic, PF 12% of Basic (both employee & employer,
-// capped at 15,000 basic), flat professional tax, gratuity 4.81% of Basic —
-// mirrors the reference app's salary-structure panel.
-function salaryBreakup(annualCtc) {
+async function getPolicy() {
+  let config = await prisma.hrConfig.findFirst();
+  if (!config) config = await prisma.hrConfig.create({ data: {} });
+  return config;
+}
+
+// CTC breakup driven by the configurable CTC Split Settings (see PUT /ctc-settings)
+// rather than hardcoded percentages: Basic is a % of CTC, HRA/Bonus/PF/Gratuity are
+// % of Basic (PF capped), flat professional tax, Special Allowance absorbs the
+// remainder so the pieces reconcile exactly back to CTC — mirrors the reference
+// app's Salary Structure panel and its Configuration Policies screen.
+function salaryBreakup(annualCtc, cfg) {
   const monthlyCtc = annualCtc / 12;
-  const basic = Math.round(monthlyCtc * 0.5);
-  const hra = Math.round(basic * 0.4);
-  const bonus = Math.round(basic * 0.0833);
-  const pfBase = Math.min(basic, 15000);
-  const employeePf = Math.round(pfBase * 0.12);
-  const employerPf = Math.round(pfBase * 0.12);
-  const professionalTax = 200;
-  const gratuity = Math.round(basic * 0.0481);
+  const basic = Math.round(monthlyCtc * (cfg.basicPctOfCtc / 100));
+  const hra = Math.round(basic * (cfg.hraPctOfBasic / 100));
+  const bonus = Math.round(basic * (cfg.bonusPctOfBasic / 100));
+  const employeePf = Math.round(Math.min(basic * (cfg.employeePfPctOfBasic / 100), cfg.employeePfMonthlyCap));
+  const employerPf = Math.round(Math.min(basic * (cfg.employerPfPctOfBasic / 100), cfg.employerPfMonthlyCap));
+  const professionalTax = cfg.professionalTaxFlat;
+  const gratuity = Math.round(basic * (cfg.gratuityPctOfBasic / 100));
   const gross = basic + hra + bonus;
   const special = Math.max(0, Math.round(monthlyCtc - gross - employerPf - gratuity));
   const grossWithSpecial = gross + special;
@@ -29,12 +35,6 @@ function salaryBreakup(annualCtc) {
   const net = grossWithSpecial - deductions;
   const ctcCheck = Math.round((grossWithSpecial + employerPf + gratuity) * 12);
   return { basic, hra, bonus, special, employerPf, employeePf, professionalTax, gratuity, gross: grossWithSpecial, deductions, net, ctcCheck };
-}
-
-async function getPolicy() {
-  let config = await prisma.hrConfig.findFirst();
-  if (!config) config = await prisma.hrConfig.create({ data: {} });
-  return config;
 }
 
 router.get('/', async (req, res) => {
@@ -54,23 +54,31 @@ router.get('/', async (req, res) => {
 // ---- Salary structures ----
 
 router.get('/structure', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const cfg = await getPolicy();
   const employees = await prisma.employee.findMany({ include: { salaryStructure: true }, orderBy: { name: 'asc' } });
   res.json(
     employees.map((e) => {
       const ss = e.salaryStructure;
-      const breakup = ss && ss.payMode === 'Package' ? salaryBreakup(ss.ctc || 0) : null;
+      const breakup = ss && ss.payMode === 'Package' ? salaryBreakup(ss.ctc || 0, cfg) : null;
       return { employeeId: e.id, employeeCode: e.employeeCode, name: e.name, department: e.department, structure: ss, breakup };
     })
   );
 });
 
+// Reference CTC breakup for the "Standard Package" example shown on the Payroll dashboard.
+router.get('/reference-structure', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const cfg = await getPolicy();
+  res.json(salaryBreakup(Number(req.query.ctc) || 300000, cfg));
+});
+
 router.put('/structure/:employeeId', requireRole(...PAYROLL_ROLES), async (req, res) => {
   const { payMode, ctc, stipend } = req.body;
+  const cfg = await getPolicy();
   const data = {};
   if (payMode) data.payMode = payMode;
   if (ctc != null) {
     data.ctc = Number(ctc);
-    const b = salaryBreakup(Number(ctc));
+    const b = salaryBreakup(Number(ctc), cfg);
     Object.assign(data, { basic: b.basic, hra: b.hra, bonus: b.bonus, specialAllowance: b.special, employerPf: b.employerPf, employeePf: b.employeePf, professionalTax: b.professionalTax, gratuity: b.gratuity });
   }
   if (stipend != null) data.stipend = Number(stipend);
@@ -82,6 +90,18 @@ router.put('/structure/:employeeId', requireRole(...PAYROLL_ROLES), async (req, 
   });
   await logAudit({ userId: req.user.id, action: 'Salary structure updated', entity: 'SalaryStructure', entityId: structure.id });
   res.json(structure);
+});
+
+// ---- CTC Split Settings (how CTC is broken into components) ----
+
+router.put('/ctc-settings', requireRole('SUPER_ADMIN', 'ADMIN'), async (req, res) => {
+  const fields = ['basicPctOfCtc', 'hraPctOfBasic', 'bonusPctOfBasic', 'employeePfPctOfBasic', 'employerPfPctOfBasic', 'employeePfMonthlyCap', 'employerPfMonthlyCap', 'gratuityPctOfBasic', 'professionalTaxFlat'];
+  const config = await getPolicy();
+  const data = {};
+  fields.forEach((f) => { if (req.body[f] != null) data[f] = Number(req.body[f]); });
+  const updated = await prisma.hrConfig.update({ where: { id: config.id }, data });
+  await logAudit({ userId: req.user.id, action: 'CTC split settings updated', entity: 'HrConfig', entityId: updated.id });
+  res.json(updated);
 });
 
 // ---- Payroll policy (how attendance turns into pay) ----
@@ -143,7 +163,7 @@ router.post('/run', requireRole(...PAYROLL_ROLES), async (req, res) => {
   const payslips = [];
   for (const emp of employees) {
     const ctc = emp.salaryStructure?.payMode === 'Package' ? emp.salaryStructure.ctc : Number(defaultCTC) || 600000;
-    const b = salaryBreakup(ctc);
+    const b = salaryBreakup(ctc, policy);
     const gross = b.gross;
 
     const records = await prisma.attendance.findMany({ where: { employeeId: emp.id, date: { startsWith: month } } });
