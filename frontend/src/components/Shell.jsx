@@ -22,10 +22,25 @@ const HR_ITEMS = [
   { to: '/employee-services', label: 'Employee Services', icon: '🛎️' },
 ];
 
+// Employees get a direct link to their own fill-in-the-full-form profile
+// (distinct from the login-settings "Profile" under Account) — HR/managers
+// use Employee Management under Administration instead.
+const HR_ITEMS_EMPLOYEE = [
+  { to: '/hrms', label: 'HRMS Dashboard', icon: '📊' },
+  { to: '/my-profile', label: 'My Profile', icon: '🧑‍💼' },
+  { to: '/attendance', label: 'Attendance & Time', icon: '⏱️' },
+  { to: '/leave', label: 'Leave & Holidays', icon: '🌴' },
+  { to: '/payroll', label: 'Payroll & Compensation', icon: '💰' },
+  { to: '/performance', label: 'Performance & Development', icon: '🎯' },
+  { to: '/employee-services', label: 'Employee Services', icon: '🛎️' },
+];
+
 function groupsForRole(role) {
   const groups = [];
-  if (HR_MANAGE_ROLES.includes(role) || role === 'EMPLOYEE') {
+  if (HR_MANAGE_ROLES.includes(role)) {
     groups.push({ label: 'HRMS', items: HR_ITEMS });
+  } else if (role === 'EMPLOYEE') {
+    groups.push({ label: 'HRMS', items: HR_ITEMS_EMPLOYEE });
   }
   if (ATS_ROLES.includes(role)) {
     groups.push({
