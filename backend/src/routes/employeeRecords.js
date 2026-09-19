@@ -10,7 +10,7 @@ const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL',
 // Expense Claims, Helpdesk, Access Requests, Weekly Ideas) off one EmployeeRecord
 // model, discriminated by `type`. Each router mounted from index.js is scoped
 // to its own type so the frontend just sees a normal-looking REST resource.
-function employeeRecordRouter(type, { decisionRoles = HR_ROLES, extraFields = [] } = {}) {
+function employeeRecordRouter(type, { decisionRoles = HR_ROLES, createRoles = null } = {}) {
   const router = express.Router();
   router.use(requireAuth);
 
@@ -29,7 +29,10 @@ function employeeRecordRouter(type, { decisionRoles = HR_ROLES, extraFields = []
   });
 
   router.post('/', async (req, res) => {
-    const { title, detail, date, amount, hours } = req.body;
+    if (createRoles && !createRoles.includes(req.user.role)) {
+      return res.status(403).json({ error: "This isn't included in your role's permissions" });
+    }
+    const { title, detail, date, amount, hours, category, priority, progressPct, location } = req.body;
     let employeeId = req.body.employeeId;
     if (req.user.role === 'EMPLOYEE') {
       const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });
@@ -39,7 +42,12 @@ function employeeRecordRouter(type, { decisionRoles = HR_ROLES, extraFields = []
     if (!employeeId || !title) return res.status(400).json({ error: 'employeeId and title are required' });
 
     const record = await prisma.employeeRecord.create({
-      data: { type, employeeId, title, detail, date, amount: amount != null ? Number(amount) : null, hours: hours != null ? Number(hours) : null },
+      data: {
+        type, employeeId, title, detail, date, category, priority, location,
+        amount: amount != null ? Number(amount) : null,
+        hours: hours != null ? Number(hours) : null,
+        progressPct: progressPct != null ? Number(progressPct) : null,
+      },
     });
     await logAudit({ userId: req.user.id, action: `${type} created`, entity: 'EmployeeRecord', entityId: record.id });
     res.status(201).json(record);
@@ -50,6 +58,22 @@ function employeeRecordRouter(type, { decisionRoles = HR_ROLES, extraFields = []
     if (!status) return res.status(400).json({ error: 'status is required' });
     const record = await prisma.employeeRecord.update({ where: { id: req.params.id }, data: { status } });
     await logAudit({ userId: req.user.id, action: `${type} status changed`, entity: 'EmployeeRecord', entityId: record.id, toValue: status });
+    res.json(record);
+  });
+
+  // Free-form field patch (e.g. progress %) — for the record's own employee or HR.
+  router.patch('/:id', async (req, res) => {
+    const existing = await prisma.employeeRecord.findUnique({ where: { id: req.params.id } });
+    if (!existing) return res.status(404).json({ error: 'Record not found' });
+    if (req.user.role === 'EMPLOYEE') {
+      const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });
+      if (!own || existing.employeeId !== own.id) return res.status(403).json({ error: "This isn't included in your role's permissions" });
+    }
+    const { progressPct, detail } = req.body;
+    const data = {};
+    if (progressPct != null) data.progressPct = Number(progressPct);
+    if (detail !== undefined) data.detail = detail;
+    const record = await prisma.employeeRecord.update({ where: { id: req.params.id }, data });
     res.json(record);
   });
 

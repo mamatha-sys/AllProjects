@@ -27,6 +27,17 @@ export default function Documents() {
     load();
   }
 
+  async function toggleVisibility(id) {
+    await api.put(`/documents/${id}/visibility`);
+    load();
+  }
+
+  async function remove(id) {
+    if (!confirm('Delete this document?')) return;
+    await api.delete(`/documents/${id}`);
+    load();
+  }
+
   return (
     <div>
       <div className="page-head"><h1>Documents</h1></div>
@@ -50,7 +61,7 @@ export default function Documents() {
 
       <div className="tbl-wrap">
         <table>
-          <thead><tr><th>Title</th><th>Category</th><th>Mandatory</th><th>Target</th><th>Uploaded</th><th>Acknowledged by</th>{!isHR && <th></th>}</tr></thead>
+          <thead><tr><th>Title</th><th>Category</th><th>Mandatory</th><th>Target</th><th>Uploaded by</th><th>Date</th><th>Acknowledged</th><th></th></tr></thead>
           <tbody>
             {documents.map((d) => (
               <tr key={d.id}>
@@ -58,12 +69,21 @@ export default function Documents() {
                 <td>{d.category}</td>
                 <td>{d.mandatory ? 'Yes' : 'No'}</td>
                 <td>{d.target}</td>
+                <td>{d.uploadedBy || '—'}</td>
                 <td>{d.uploadedDate}</td>
-                <td>{d.acknowledgments.length}</td>
-                {!isHR && <td><button className="btn btn-sm" onClick={() => acknowledge(d.id)}>Acknowledge</button></td>}
+                <td>{d.acknowledgments.length} of {d.totalEmployees}</td>
+                <td>
+                  {!isHR && <button className="btn btn-sm" onClick={() => acknowledge(d.id)}>Acknowledge</button>}
+                  {isHR && (
+                    <>
+                      <button className="btn btn-sm" onClick={() => toggleVisibility(d.id)}>{d.published ? 'Hide from Employees' : 'Publish'}</button>{' '}
+                      <button className="btn btn-sm" onClick={() => remove(d.id)}>Delete</button>
+                    </>
+                  )}
+                </td>
               </tr>
             ))}
-            {documents.length === 0 && <tr><td colSpan={isHR ? 6 : 7} className="small-muted">No documents yet.</td></tr>}
+            {documents.length === 0 && <tr><td colSpan="8" className="small-muted">No documents yet.</td></tr>}
           </tbody>
         </table>
       </div>

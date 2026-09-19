@@ -11,6 +11,7 @@ export default function Disciplinary() {
       dateLabel="Date"
       statuses={['Open', 'Under Review', 'Closed']}
       decisions={['Under Review', 'Closed']}
+      createByHrOnly
     />
   );
 }

@@ -192,8 +192,24 @@ model EmployeeRecord {
   date       String?  // due date / shift date / timesheet date / expense date, as relevant
   amount     Float?   // expense claim amount
   hours      Float?   // timesheet hours
+  category   String?  // helpdesk category / expense category / asset type, as relevant
+  priority   String?  // helpdesk priority: Low | Medium | High | Urgent
+  progressPct Int?    // 0-100, for targets/goals
+  location   String?  // expense claim location / travel destination
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+// Named shift patterns (e.g. Morning 09:00–18:00) that employees are rostered
+// into — Shift & Roster assigns an employee to one of these per date via
+// EmployeeRecord(type: 'SHIFT').
+model ShiftPattern {
+  id        String   @id @default(cuid())
+  name      String
+  startTime String
+  endTime   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
 }
 
 model Attendance {
@@ -445,6 +461,7 @@ model PolicyDocument {
   mandatory   Boolean  @default(false)
   published   Boolean  @default(true)
   target      String?  @default("All Employees")
+  uploadedBy  String?
   uploadedDate String
   createdAt   DateTime @default(now())
 
@@ -466,9 +483,10 @@ model Announcement {
   id        String   @id @default(cuid())
   title     String
   body      String
-  category  String?  // Holiday | Policy | General
+  category  String?  // Holiday | Policy | General | Event
   pinned    Boolean  @default(false)
   target    String?  @default("All Employees")
+  postedBy  String?
   date      String
   createdAt DateTime @default(now())
 }

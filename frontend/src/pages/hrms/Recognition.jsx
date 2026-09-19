@@ -11,6 +11,7 @@ export default function Recognition() {
       dateLabel="Date"
       statuses={['Awarded']}
       decisions={null}
+      createByHrOnly
     />
   );
 }

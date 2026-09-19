@@ -22,6 +22,17 @@ export default function Announcements() {
     load();
   }
 
+  async function togglePin(id) {
+    await api.put(`/announcements/${id}/pin`);
+    load();
+  }
+
+  async function remove(id) {
+    if (!confirm('Delete this announcement?')) return;
+    await api.delete(`/announcements/${id}`);
+    load();
+  }
+
   return (
     <div>
       <div className="page-head"><h1>Announcements</h1></div>
@@ -40,8 +51,16 @@ export default function Announcements() {
 
       {announcements.map((a) => (
         <div className="card" key={a.id}>
-          <h3 style={{ fontSize: 14, marginBottom: 4 }}>{a.pinned && '📌 '}{a.title} <span className="status">{a.category}</span></h3>
-          <div className="small-muted">{a.date}</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <h3 style={{ fontSize: 14, margin: 0 }}>{a.pinned && '📌 '}{a.title} <span className="status">{a.category}</span></h3>
+            {isHR && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-sm" onClick={() => togglePin(a.id)}>{a.pinned ? 'Unpin' : 'Pin'}</button>
+                <button className="btn btn-sm" onClick={() => remove(a.id)}>Delete</button>
+              </div>
+            )}
+          </div>
+          <div className="small-muted">By {a.postedBy || 'HR'} · {a.date}</div>
           <p style={{ marginTop: 8 }}>{a.body}</p>
         </div>
       ))}

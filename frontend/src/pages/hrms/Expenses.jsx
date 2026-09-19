@@ -3,15 +3,20 @@ import SimpleRecordPage from '../../components/SimpleRecordPage.jsx';
 export default function Expenses() {
   return (
     <SimpleRecordPage
-      title="Expense Claims"
+      title="Expense & Travel Claims"
       apiPath="/expenses"
-      titleLabel="Claim"
+      titleLabel="Description"
       detailLabel="Notes"
+      showCategory
+      categoryLabel="Category"
+      categoryOptions={['Food', 'Travel', 'Accommodation', 'Other']}
+      showLocation
       showDate
       dateLabel="Date"
       showAmount
-      statuses={['Pending', 'Approved', 'Rejected']}
-      decisions={['Approved', 'Rejected']}
+      amountLabel="Amount (₹)"
+      statuses={['Pending', 'Approved', 'Reimbursed', 'Rejected']}
+      decisions={['Approved', 'Reimbursed', 'Rejected']}
     />
   );
 }

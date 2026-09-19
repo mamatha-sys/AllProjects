@@ -6,11 +6,17 @@ export default function Assets() {
       title="Assets"
       apiPath="/assets"
       titleLabel="Asset"
-      detailLabel="Details"
+      detailLabel="Serial / Details"
+      showCategory
+      categoryLabel="Asset Type"
+      categoryOptions={['Laptop', 'Mobile', 'Monitor', 'Printer', 'Furniture', 'Other']}
+      showAmount
+      amountLabel="Cost (₹)"
       showDate
       dateLabel="Issued Date"
-      statuses={['Issued', 'Returned', 'Lost']}
-      decisions={['Returned', 'Lost']}
+      statuses={['Assigned', 'In Store', 'Under Repair', 'Disposed']}
+      decisions={['In Store', 'Under Repair', 'Disposed']}
+      createByHrOnly
     />
   );
 }
