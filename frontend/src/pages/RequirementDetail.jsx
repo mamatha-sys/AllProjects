@@ -3,16 +3,15 @@ import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import api from '../api';
 
-// Keep in step with STAGE_OWNERS in backend/src/routes/applications.js.
-const STAGES = [
-  'NEW', 'AI_INTERVIEW_REQUIRED', 'AI_INTERVIEW_SCHEDULED', 'AI_INTERVIEW_COMPLETED',
-  'RECRUITER_REVIEW', 'RECRUITER_APPROVED', 'WITH_BDE', 'BDE_APPROVED',
-  'SHARED_WITH_CLIENT', 'CLIENT_REVIEW', 'CLIENT_SHORTLISTED', 'INTERVIEW_SCHEDULED',
-  'INTERVIEW_COMPLETED', 'SELECTED', 'OFFER', 'OFFER_ACCEPTED', 'JOINED', 'HIRED',
-  'REJECTED', 'HOLD',
-];
+import { ALL_STAGE_CODES, stageLabel, requirementStatusLabel } from '../atsVocab';
 
 const RAISE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'TL', 'STL', 'ASSISTANT_MANAGER'];
+
+function priorityClass(priority) {
+  if (priority === 'Urgent' || priority === 'High') return 'priority-high';
+  if (priority === 'Medium') return 'priority-medium';
+  return 'priority-low';
+}
 
 export default function RequirementDetail() {
   const { id } = useParams();
@@ -74,20 +73,48 @@ export default function RequirementDetail() {
     <div>
       <Link className="small-muted" to="/requirements">← Back to requirements</Link>
       <div className="page-head" style={{ marginTop: 10 }}>
-        <h1>{requirement.title}</h1>
-        <span className={`status priority-${requirement.priority.toLowerCase()}`}>{requirement.priority}</span>
+        <div>
+          <h1>{requirement.title}</h1>
+          <div className="page-sub">
+            {[requirement.internal ? 'TeamLink Internal' : requirement.client?.name, requirement.department]
+              .filter(Boolean).join(' · ')}
+          </div>
+        </div>
+        <span className={`status ${priorityClass(requirement.priority)}`}>{requirement.priority}</span>
       </div>
+
+      {/* Openings / Filled / Remaining and the count of candidates at or above
+          the match threshold — the prototype's "Matching Candidates" panel. */}
+      <div className="card section">
+        <h3>Matching Candidates</h3>
+        <div className="small-muted">
+          Candidates in the master at or above {requirement.matchThreshold ?? 70}% match ·
+          {' '}Openings {requirement.openings} · Filled {requirement.filled ?? 0} · Remaining {requirement.remaining ?? requirement.openings}
+        </div>
+        <div className="statbar" style={{ marginTop: 10 }}>
+          <div className="statitem">
+            <div className="n">{requirement.matchingCandidates ?? 0}</div>
+            <div className="l">At or above threshold</div>
+          </div>
+        </div>
+      </div>
+
       <div className="card">
-        <div className="kv"><span className="k">Client</span><span>{requirement.client?.name}</span></div>
+        <div className="kv"><span className="k">Client</span><span>{requirement.internal ? 'TeamLink Internal' : requirement.client?.name}</span></div>
+        <div className="kv"><span className="k">Location</span><span>{[requirement.location, requirement.workMode].filter(Boolean).join(' · ') || '—'}</span></div>
         <div className="kv"><span className="k">Department</span><span>{requirement.department || '—'}</span></div>
         <div className="kv"><span className="k">Skills</span><span>{requirement.skills || '—'}</span></div>
+        <div className="kv"><span className="k">Good-to-have Skills</span><span>{requirement.goodToHaveSkills || '—'}</span></div>
         <div className="kv"><span className="k">Experience</span><span>{requirement.experience || '—'}</span></div>
+        <div className="kv"><span className="k">Salary</span><span>{requirement.salary || '—'}</span></div>
         <div className="kv"><span className="k">Openings</span><span>{requirement.openings}</span></div>
-        <div className="kv"><span className="k">Recruiter</span><span>{requirement.recruiter?.name || '—'}</span></div>
-        <div className="kv"><span className="k">BDE</span><span>{requirement.bde?.name || '—'}</span></div>
-        <div className="kv"><span className="k">Status</span><span className="status">{requirement.status}</span></div>
+        <div className="kv"><span className="k">Priority</span><span>{requirement.priority}</span></div>
+        <div className="kv"><span className="k">Recruiter / BDE</span><span>{`${requirement.recruiter?.name || '—'} / ${requirement.bde?.name || '—'}`}</span></div>
+        <div className="kv"><span className="k">Closing</span><span>{requirement.closingDate || '—'}</span></div>
+        <div className="kv"><span className="k">Type</span><span>{requirement.internal ? 'Internal' : 'Client'}</span></div>
+        <div className="kv"><span className="k">Status</span><span className="status">{requirementStatusLabel(requirement.status)}</span></div>
         {canManage && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+          <div className="qa-row" style={{ marginTop: 10 }}>
             <button className="btn btn-sm" onClick={() => runAction('generate-jd')}>Generate job description</button>
             {requirement.status === 'DRAFT' ? (
               <button className="btn btn-sm btn-primary" onClick={() => runAction('activate')}>Activate requirement</button>
@@ -125,17 +152,26 @@ export default function RequirementDetail() {
           <h3>Suggested candidates <span className="small-muted">({matching.length} match this requirement)</span></h3>
           <div className="tbl-wrap">
             <table>
-              <thead><tr><th>Candidate</th><th>Match</th><th>Why</th><th></th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Candidate</th><th>Location</th><th>Experience</th>
+                  <th>Matching Skills</th><th>Missing Mandatory</th><th>Score</th><th>Action</th>
+                </tr>
+              </thead>
               <tbody>
                 {matching.slice(0, 8).map((c) => (
                   <tr key={c.id}>
                     <td><Link to={`/candidates/${c.id}`}>{c.name}</Link></td>
-                    <td><span className="status">{c.match.overall}%</span></td>
-                    <td className="small-muted">
-                      {c.match.reasons.join('; ') || '—'}
-                      {c.match.gaps.length > 0 && <div>Gaps: {c.match.gaps.join('; ')}</div>}
+                    <td>{c.location || '—'}</td>
+                    <td>{c.experienceYears != null ? `${c.experienceYears} yrs` : '—'}</td>
+                    <td>{c.match.matchedSkills.slice(0, 3).join(', ') || '—'}</td>
+                    <td>
+                      {c.match.missingSkills.length
+                        ? c.match.missingSkills.slice(0, 3).join(', ')
+                        : <span className="status priority-low">None</span>}
                     </td>
-                    <td><button className="btn btn-sm" onClick={(e) => linkCandidate(e, c.id)}>Add to pipeline</button></td>
+                    <td><span className="status">{c.match.overall}%</span></td>
+                    <td><button className="btn btn-sm" onClick={(e) => linkCandidate(e, c.id)}>Add to Pipeline</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -145,24 +181,25 @@ export default function RequirementDetail() {
       )}
 
       <div className="card section">
-        <h3>Pipeline</h3>
+        <h3>Candidates in pipeline ({requirement.applications?.length ?? 0})</h3>
         <div className="tbl-wrap">
           <table>
-            <thead><tr><th>Candidate</th><th>Stage</th><th>Move to…</th></tr></thead>
+            <thead><tr><th>Candidate</th><th>Stage</th><th>Score</th><th>Move to…</th></tr></thead>
             <tbody>
               {requirement.applications?.map((a) => (
                 <tr key={a.id}>
                   <td><Link to={`/candidates/${a.candidate.id}`}>{a.candidate.name}</Link></td>
-                  <td><span className="status">{a.stage.replace(/_/g, ' ')}</span></td>
+                  <td><span className="status">{stageLabel(a.stage)}</span></td>
+                  <td>{a.matchScore != null ? `${a.matchScore}%` : a.resumeScore != null ? `${a.resumeScore}%` : '—'}</td>
                   <td>
                     <select value={a.stage} onChange={(e) => setStage(a.id, e.target.value)}>
-                      {STAGES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                      {ALL_STAGE_CODES.map((s) => <option key={s} value={s}>{stageLabel(s)}</option>)}
                     </select>
                   </td>
                 </tr>
               ))}
               {(!requirement.applications || requirement.applications.length === 0) && (
-                <tr><td colSpan="3" className="small-muted">No candidates in this pipeline yet.</td></tr>
+                <tr><td colSpan="4" className="small-muted">No candidates in the pipeline yet.</td></tr>
               )}
             </tbody>
           </table>

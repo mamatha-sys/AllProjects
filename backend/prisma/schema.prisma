@@ -10,14 +10,20 @@ datasource db {
 // SQLite has no native enum support in Prisma, so these are plain strings.
 // Valid values, enforced in application code (see backend/src/routes):
 // Role: SUPER_ADMIN | ADMIN | MANAGER | ASSISTANT_MANAGER | STL | TL | RECRUITER | BDE | CLIENT | ACCOUNTANT | EMPLOYEE
-// Priority: HIGH | MEDIUM | LOW
+// Priority: Low | Medium | High | Urgent (the prototype's Create Requirement list)
 // RequirementStatus: DRAFT | OPEN | CLOSED
 // ApplicationStage: NEW | AI_INTERVIEW_REQUIRED | AI_INTERVIEW_SCHEDULED | AI_INTERVIEW_COMPLETED |
 //   RECRUITER_REVIEW | RECRUITER_APPROVED | WITH_BDE | BDE_APPROVED | SHARED_WITH_CLIENT |
 //   CLIENT_REVIEW | CLIENT_SHORTLISTED | INTERVIEW_SCHEDULED | INTERVIEW_COMPLETED | SELECTED | OFFER |
 //   OFFER_ACCEPTED | JOINED | HIRED | REJECTED | HOLD
 // InterviewStatus: SCHEDULED | COMPLETED | CANCELLED
-// AgreementStatus: NOT_SENT | DRAFT | SENT | VIEWED | SIGNED
+// AgreementStatus: DRAFT | SENT | CONFIRMED | ACTIVE | CANCELLED | EXPIRED
+//   (the reference prototype's agreement lifecycle — a client requirement can
+//    only be activated or posted once its agreement reaches ACTIVE)
+//
+// Stage codes are stored; the exact label a user reads for each one lives in
+// backend/src/utils/atsVocab.js (STAGE_LABELS) and is taken verbatim from the
+// prototype. Never derive a label from a code.
 
 model User {
   id             String   @id @default(cuid())
@@ -45,11 +51,71 @@ model Client {
   location  String?
   createdAt DateTime @default(now())
 
+  // Company / classification — the prototype's Add Client "Basic Info" tab.
+  legalName        String?
+  website          String?
+  ownerDepartment  String?
+  yearEstablished  String?
+  landline         String?
+  status           String?  @default("Active") // Active | Inactive | Suspended
+  activeDate       String?
+  clientType       String? // Direct | Vendor | Partner
+  priority         String?  @default("High") // High | Medium | Low
+
+  // Primary / secondary contact.
+  contactName          String?
+  contactDesignation   String?
+  contactPhone         String?
+  contactEmail         String?
+  contactWhatsApp      String?
+  secondaryContactName      String?
+  secondaryContactDesignation String?
+  secondaryContactPhone     String?
+  secondaryContactEmail     String?
+  commPrimary          String? // Email | WhatsApp | Phone
+  commSecondary        String?
+  commChannels         String? // comma-separated: Email,WhatsApp,SMS
+
+  // Address.
+  houseNumber String?
+  street      String?
+  landmark    String?
+  area        String?
+  pincode     String?
+  country     String? @default("India")
+  state       String?
+
+  // Legal & finance — the prototype's "Legal & Finance" tab. These drive both
+  // the agreement document and the invoice raised when a candidate joins.
+  gst              String?
+  pan              String?
+  tan              String?
+  businessType     String? @default("Private Limited")
+  tdsPercent       Float?  @default(10)
+  gstPercent       Float?  @default(18)
+  paymentTerms     String? @default("Invoice 6 days after joining; payment due within 6 days of invoice")
+  guaranteePeriod  String? @default("30 Days")
+  invoiceTrigger   String? @default("Candidate Joining")
+  paymentDue       String? @default("6 days after invoice")
+  commercialNotes  String?
+  accountManager   String?
+  bdeOwner         String?
+
+  // Risk monitoring tab.
+  riskFlag  String? @default("None") // None | Watch | High Risk
+  riskNotes String?
+
   // Service agreement / e-sign flow. The document is generated from the client
-  // record, sent for signature, then confirmed either by the client's own login
-  // or through the tokenised public signing link (see routes/public.js).
+  // record, sent for signature, confirmed either by the client's own login or
+  // through the tokenised public signing link (see routes/public.js), and then
+  // activated — which is what unblocks requirements for this client.
   agreementId        String?   @unique // human-readable reference, e.g. AGR0001
-  agreementStatus    String    @default("NOT_SENT") // NOT_SENT | DRAFT | SENT | VIEWED | SIGNED
+  agreementStatus    String    @default("DRAFT") // DRAFT | SENT | CONFIRMED | ACTIVE | CANCELLED | EXPIRED
+  agreementRequired  String?   @default("Yes")
+  agreementTemplate  String?   @default("Standard Recruitment / Staffing")
+  agreementStart     String?
+  agreementEnd       String?
+  agreementActivatedAt DateTime?
   agreementDocument  String? // generated agreement text
   agreementFeePercent Float?   @default(8.33) // placement fee, % of annual CTC
   esignToken         String?   @unique // opaque token in the client-facing signing link
@@ -71,11 +137,34 @@ model Requirement {
   clientId      String
   client        Client             @relation(fields: [clientId], references: [id])
   department    String?
-  priority      String             @default("MEDIUM")
+  priority      String             @default("Medium")
   status        String             @default("OPEN") // DRAFT | OPEN | CLOSED
-  skills        String? // comma-separated must-have skills, drives candidate matching + JD
+  skills        String? // comma-separated MANDATORY skills, drives candidate matching + JD
   experience    String? // e.g. "5-8" years, shown on the generated job description
   openings      Int                @default(1)
+
+  // Prototype Create Requirement form (openAddRequirementModal / collectRequirementForm).
+  internal            Boolean @default(false) // Internal Requirement vs Client Requirement
+  closingDate         String?
+  jobDescription      String?
+  responsibilities    String?
+  qualifications      String?
+  education           String? @default("Any Degree")
+  goodToHaveSkills    String? // comma-separated
+  employmentType      String? @default("Full Time")
+  workMode            String? @default("Work From Office")
+  location            String?
+  preferredLocation   String? @default("Any")
+  relevantExperience  String?
+  joiningTimeline     String? @default("Within 15 Days")
+  noticePeriodMax     String? @default("30 Days")
+  jobPreference       String? @default("Permanent")
+  salaryType          String? @default("Annual CTC")
+  currency            String? @default("INR")
+  salary              String? // rendered band, e.g. "₹14L - ₹20L"
+  tl                  String?
+  stl                 String?
+  postingSources      String? // comma-separated selected posting sources
   recruiterId   String?
   recruiter     User?              @relation("RecruiterRequirements", fields: [recruiterId], references: [id])
   bdeId         String?
@@ -93,9 +182,39 @@ model Candidate {
   email     String?
   phone     String?
   source    String?  @default("TeamLink Website")
-  skills    String? // comma-separated, scored against Requirement.skills for match suggestions
+  skills    String? // comma-separated MANDATORY skills, scored against Requirement.skills
   experienceYears Float?
   createdAt DateTime @default(now())
+
+  // Prototype Add Candidate form (openAddCandidateModal / acCollectCandidate).
+  // These are the signals the prototype's computeMatch() actually scores on —
+  // see backend/src/utils/matching.js.
+  dob                     String?
+  gender                  String?
+  location                String?
+  preferredLocation       String?
+  currentCompany          String?
+  currentDesignation      String?
+  relevantExperienceYears Float?
+  currentSalary           String?
+  expectedSalary          String?
+  noticePeriod            String? @default("30 Days")
+  availability            String? @default("Available after notice period")
+  jobPreference           String? @default("Permanent")
+  preferredEmploymentType String? @default("Full Time")
+  preferredWorkMode       String? @default("Hybrid")
+  education               String?
+  specialization          String?
+  institute               String?
+  passingYear             String?
+  goodToHaveSkills        String? // comma-separated
+  technicalSkills         String? // comma-separated
+  softSkills              String? // comma-separated
+  resumeName              String?
+  resumeScore             Int?
+  firstSource             String?
+  sourceCampaign          String?
+  profileStatus           String? @default("Active")
 
   applications Application[]
   invoices     Invoice[]
@@ -110,6 +229,19 @@ model Application {
   stage         String            @default("NEW")
   interviewStatus   String?
   interviewAt       DateTime?
+
+  // Per-application detail the prototype's pipeline columns read from.
+  matchScore        Int?
+  resumeScore       Int?
+  source            String?
+  firstSource       String?
+  sourceCampaign    String?
+  applicationMethod String?  @default("Manual") // Manual | Auto-Apply
+  aiInterviewStatus String?  @default("Required")
+  aiInterviewScore  Int?
+  // Client joining -> Accounts hand-off (prototype confirmClientJoining).
+  offeredCtc        Float?
+  joiningDate       String?
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -399,7 +531,11 @@ model Invoice {
   status          String    @default("Pending") // Pending | Paid | Overdue
   invoiceDate     String
   dueDate         String?
-  paymentTerms    String?   @default("Net 30")
+  paymentTerms    String?   @default("Invoice 6 days after joining; payment due within 6 days of invoice")
+  // Commercial trail for an invoice raised from ATS on candidate joining.
+  feePercent      Float?
+  offeredCtc      Float?
+  joiningDate     String?
   createdAt       DateTime  @default(now())
 }
 

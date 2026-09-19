@@ -18,18 +18,47 @@ async function main() {
     ],
   });
 
-  // Orbit's service agreement is already signed, so its requirements can be
-  // activated; Medivant's has not been raised yet.
+  // Orbit's agreement is Active, so its requirements can be activated and
+  // posted; Medivant's is still a Draft, so its requirement correctly cannot.
+  // Client names, industries and locations follow the prototype's CLIENTS_SEED.
   const orbit = await prisma.client.create({
     data: {
-      name: 'Orbit Software Solutions', industry: 'IT', location: 'Hyderabad',
-      agreementId: 'AGR0001', agreementStatus: 'SIGNED', agreementFeePercent: 8.33,
+      name: 'Orbit Software Solutions', legalName: 'Orbit Software Solutions Pvt. Ltd.',
+      industry: 'IT', location: 'Hyderabad', state: 'Telangana', country: 'India',
+      ownerDepartment: 'IT', clientType: 'Direct', priority: 'High', status: 'Active',
+      businessType: 'Private Limited', website: 'https://orbitsoftware.example',
+      contactName: 'Ravi Teja', contactDesignation: 'Head of Talent',
+      contactEmail: 'hr@orbit.com', contactPhone: '9100000001',
+      commPrimary: 'Email', commSecondary: 'Phone', commChannels: 'Email,WhatsApp',
+      accountManager: 'Kiran Kumar', bdeOwner: 'Sanjay Mehta',
+      gst: '36AAAAA1111A1Z5', pan: 'AAAAA1111A', tdsPercent: 10, gstPercent: 18,
+      agreementFeePercent: 8.33, guaranteePeriod: '30 Days',
+      paymentTerms: 'Invoice 6 days after joining; payment due within 6 days of invoice',
+      invoiceTrigger: 'Candidate Joining', paymentDue: '6 days after invoice',
+      riskFlag: 'None',
+      agreementId: 'AGR0001', agreementStatus: 'ACTIVE',
+      agreementRequired: 'Yes', agreementTemplate: 'Standard Recruitment / Staffing',
+      agreementStart: '2026-08-01', agreementEnd: '2027-07-31',
       agreementDocument: 'TEAMLINK CONSULTANTS\nRECRUITMENT / STAFFING SERVICES AGREEMENT\nClient: Orbit Software Solutions (IT)\n\n(Seeded sample — use “Regenerate document” on the client page for the full text.)',
       esignToken: 'ESN-SEEDORBIT0001', agreementSentAt: new Date('2026-09-01'),
       agreementSignedAt: new Date('2026-09-03'), agreementSignedBy: 'Ravi Teja', agreementSignedByTitle: 'Head of Talent',
+      agreementActivatedAt: new Date('2026-09-03'),
     },
   });
-  const medivant = await prisma.client.create({ data: { name: 'Medivant Healthcare', industry: 'Medical', location: 'Bengaluru' } });
+  const medivant = await prisma.client.create({
+    data: {
+      name: 'Medivant Healthcare', legalName: 'Medivant Healthcare Pvt. Ltd.',
+      industry: 'Healthcare', location: 'Bengaluru', state: 'Karnataka', country: 'India',
+      ownerDepartment: 'Medical', clientType: 'Direct', priority: 'Medium', status: 'Active',
+      contactName: 'Anita Desai', contactDesignation: 'HR Manager',
+      contactEmail: 'hr@medivant.com', contactPhone: '9100000002',
+      accountManager: 'Meera Iyer', bdeOwner: 'Pooja Bhatt',
+      gst: '36AAAAA1112A1Z5', tdsPercent: 10, gstPercent: 18,
+      agreementFeePercent: 10, guaranteePeriod: '30 Days',
+      agreementStatus: 'DRAFT', riskFlag: 'Watch',
+      riskNotes: 'New account — first invoice not yet settled.',
+    },
+  });
 
   const admin = await prisma.user.create({
     data: { name: 'Vasu (Admin)', email: 'admin@teamlink.test', passwordHash: password, role: 'SUPER_ADMIN' },
@@ -53,50 +82,155 @@ async function main() {
     data: { name: 'Meera Iyer', email: 'employee@teamlink.test', passwordHash: password, role: 'EMPLOYEE' },
   });
 
+  // Requirement titles, skills, experience bands, locations, work modes and
+  // salary bands follow the prototype's reqDefs demo set.
   const req1 = await prisma.requirement.create({
     data: {
-      title: 'Senior Backend Engineer',
-      description: 'Own the core services team building TeamLink’s backend platform. 5+ years Node.js/PostgreSQL experience.',
-      clientId: orbit.id, department: 'IT', priority: 'HIGH', recruiterId: recruiter.id, bdeId: bde.id,
-      skills: 'Node.js, PostgreSQL, REST', experience: '5-8', openings: 2,
+      title: 'Java Developer',
+      description: 'Build and own core Java services for the Orbit platform team.',
+      jobDescription: 'Build and own core Java services for the Orbit platform team, working across Spring Boot microservices and the SQL data layer.',
+      responsibilities: 'Design and ship Spring Boot microservices\nOwn service reliability and on-call for your area\nReview peers’ code and raise the team’s engineering bar',
+      qualifications: 'Bachelor’s degree in Computer Science or equivalent practical experience.',
+      clientId: orbit.id, department: 'IT', priority: 'High', recruiterId: recruiter.id, bdeId: bde.id,
+      skills: 'Java, Spring Boot, Microservices, SQL', goodToHaveSkills: 'AWS, Docker',
+      experience: '4-7 yrs', relevantExperience: '4 yrs', openings: 2,
+      education: 'B.Tech', employmentType: 'Full Time', workMode: 'Hybrid',
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      joiningTimeline: 'Within 15 Days', noticePeriodMax: '30 Days', jobPreference: 'Permanent',
+      salaryType: 'Annual CTC', currency: 'INR', salary: '₹14L - ₹20L',
+      closingDate: '2026-10-31', tl: 'Divya Rao', stl: 'Rekha Nair',
     },
   });
   const req2 = await prisma.requirement.create({
     data: {
-      title: 'Staff Nurse',
-      description: 'ICU-experienced staff nurse for a 200-bed multi-specialty hospital. Night shift rotation.',
-      clientId: medivant.id, department: 'Medical', priority: 'MEDIUM',
-      skills: 'ICU, Patient Care', experience: '2-5',
+      title: 'Clinical Research Associate',
+      description: 'Run clinical trial sites end to end for a 200-bed multi-specialty group.',
+      jobDescription: 'Run clinical trial sites end to end, owning protocol compliance, monitoring visits and regulatory submissions.',
+      clientId: medivant.id, department: 'Medical', priority: 'Medium',
+      skills: 'Clinical Trials, GCP, Regulatory Affairs', goodToHaveSkills: 'Data Analysis',
+      experience: '3-6 yrs', relevantExperience: '3 yrs',
+      education: 'B.Sc', employmentType: 'Full Time', workMode: 'Work From Office',
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      joiningTimeline: 'Within 30 Days', noticePeriodMax: '30 Days', jobPreference: 'Permanent',
+      salaryType: 'Annual CTC', currency: 'INR', salary: '₹10L - ₹15L',
     },
   });
-  // Raised but not yet activated — Medivant's agreement isn't signed, so
+  // Raised but not yet activated — Medivant's agreement is still a Draft, so
   // "Activate requirement" on this one is correctly refused.
   await prisma.requirement.create({
     data: {
-      title: 'Radiology Technician',
-      clientId: medivant.id, department: 'Medical', priority: 'LOW', status: 'DRAFT',
-      skills: 'Radiology, CT', experience: '3-6',
+      title: 'Data Analyst',
+      jobDescription: 'Own reporting and analysis across the Medivant clinical operations group.',
+      clientId: medivant.id, department: 'Medical', priority: 'Low', status: 'DRAFT',
+      skills: 'SQL, Excel, Data Analysis, Python', goodToHaveSkills: 'Machine Learning',
+      experience: '2-4 yrs', relevantExperience: '2 yrs',
+      education: 'Any Degree', employmentType: 'Full Time', workMode: 'Work From Office',
+      location: 'Pune', preferredLocation: 'Pune',
+      joiningTimeline: 'Within 30 Days', noticePeriodMax: '30 Days', jobPreference: 'Permanent',
+      salaryType: 'Annual CTC', currency: 'INR', salary: '₹8L - ₹12L',
+    },
+  });
+  // An internal TeamLink opening — no client, so it needs no agreement.
+  await prisma.requirement.create({
+    data: {
+      title: 'Talent Acquisition Executive',
+      jobDescription: 'Internal TeamLink hiring — own end-to-end recruitment for our own delivery teams.',
+      clientId: orbit.id, internal: true, department: 'HR', priority: 'Medium',
+      recruiterId: recruiter.id,
+      skills: 'Recruitment, Client Servicing', experience: '2-4 yrs', relevantExperience: '2 yrs',
+      education: 'Any Degree', employmentType: 'Full Time', workMode: 'Work From Office',
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      joiningTimeline: 'Within 15 Days', noticePeriodMax: '30 Days', jobPreference: 'Permanent',
+      salaryType: 'Annual CTC', currency: 'INR', salary: '₹6L - ₹9L',
     },
   });
 
+  // Candidates carry the full profile the matching formula actually scores on.
   const cand1 = await prisma.candidate.create({
-    data: { name: 'Arjun Mehta', email: 'arjun@example.com', phone: '9000000001', source: 'Naukri', skills: 'Node.js, PostgreSQL, REST, Docker', experienceYears: 6 },
+    data: {
+      name: 'Arjun Mehta', email: 'arjun@example.com', phone: '9000000001',
+      source: 'Naukri', firstSource: 'Naukri', sourceCampaign: 'Sep-2026 Java drive',
+      skills: 'Java, Spring Boot, Microservices, SQL', goodToHaveSkills: 'Docker',
+      technicalSkills: 'Git, Jenkins', softSkills: 'Communication, Stakeholder management',
+      experienceYears: 6, relevantExperienceYears: 5,
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      currentCompany: 'Infotech Systems', currentDesignation: 'Senior Software Engineer',
+      currentSalary: '14L', expectedSalary: '18L',
+      noticePeriod: '15 Days', availability: 'Available after notice period',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Hybrid',
+      education: 'B.Tech', specialization: 'Computer Science', institute: 'JNTU Hyderabad', passingYear: '2018',
+      resumeName: 'Arjun_Mehta_Java.pdf', resumeScore: 88, profileStatus: 'Active',
+    },
   });
   const cand2 = await prisma.candidate.create({
-    data: { name: 'Priya Sharma', email: 'priya@example.com', phone: '9000000002', source: 'LinkedIn', skills: 'Node.js, PostgreSQL, GraphQL', experienceYears: 7 },
+    data: {
+      name: 'Priya Sharma', email: 'priya@example.com', phone: '9000000002',
+      source: 'LinkedIn', firstSource: 'Naukri',
+      skills: 'Java, Spring Boot, SQL', goodToHaveSkills: 'AWS, Docker',
+      experienceYears: 7, relevantExperienceYears: 6,
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      currentCompany: 'Zenith Labs', currentDesignation: 'Lead Engineer',
+      currentSalary: '17L', expectedSalary: '20L',
+      noticePeriod: '30 Days', availability: 'Available after notice period',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Hybrid',
+      education: 'B.Tech', specialization: 'Information Technology', institute: 'Osmania University', passingYear: '2017',
+      resumeName: 'Priya_Sharma.pdf', resumeScore: 84, profileStatus: 'Active',
+    },
   });
   const cand3 = await prisma.candidate.create({
-    data: { name: 'Rahul Verma', email: 'rahul@example.com', phone: '9000000003', source: 'TeamLink Website', skills: 'ICU, Patient Care', experienceYears: 4 },
+    data: {
+      name: 'Rahul Verma', email: 'rahul@example.com', phone: '9000000003',
+      source: 'TeamLink Website', firstSource: 'TeamLink Website',
+      skills: 'Clinical Trials, GCP, Regulatory Affairs',
+      experienceYears: 4, relevantExperienceYears: 3,
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      currentCompany: 'Vireo Clinical', currentDesignation: 'Clinical Research Associate',
+      currentSalary: '9L', expectedSalary: '12L',
+      noticePeriod: '30 Days', availability: 'Available after notice period',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Work From Office',
+      education: 'B.Sc', specialization: 'Life Sciences', institute: 'Andhra University', passingYear: '2020',
+      resumeName: 'Rahul_Verma.pdf', resumeScore: 79, profileStatus: 'Active',
+    },
   });
-  // Not linked to anything yet — shows up under "Suggested candidates" on the
-  // Senior Backend Engineer requirement.
+  // Not linked to anything yet — shows up under the Java Developer
+  // requirement's matching candidates.
   await prisma.candidate.create({
-    data: { name: 'Sneha Kulkarni', email: 'sneha@example.com', phone: '9000000004', source: 'Naukri', skills: 'Node.js, PostgreSQL, REST, Redis', experienceYears: 5 },
+    data: {
+      name: 'Sneha Kulkarni', email: 'sneha@example.com', phone: '9000000004',
+      source: 'Naukri', firstSource: 'Referral',
+      skills: 'Java, Spring Boot, Microservices, SQL', goodToHaveSkills: 'AWS',
+      experienceYears: 5, relevantExperienceYears: 4,
+      location: 'Hyderabad', preferredLocation: 'Hyderabad',
+      currentCompany: 'Nimbus Tech', currentDesignation: 'Software Engineer',
+      currentSalary: '12L', expectedSalary: '16L',
+      noticePeriod: 'Immediate', availability: 'Available immediately',
+      jobPreference: 'Permanent', preferredEmploymentType: 'Full Time', preferredWorkMode: 'Hybrid',
+      education: 'B.Tech', specialization: 'Computer Science', institute: 'VNR VJIET', passingYear: '2019',
+      resumeName: 'Sneha_Kulkarni.pdf', resumeScore: 86, profileStatus: 'Active',
+    },
   });
 
-  await prisma.application.create({ data: { candidateId: cand1.id, requirementId: req1.id, stage: 'RECRUITER_REVIEW' } });
-  await prisma.application.create({ data: { candidateId: cand2.id, requirementId: req1.id, stage: 'WITH_BDE' } });
-  await prisma.application.create({ data: { candidateId: cand3.id, requirementId: req2.id, stage: 'AI_INTERVIEW_SCHEDULED' } });
+  await prisma.application.create({
+    data: {
+      candidateId: cand1.id, requirementId: req1.id, stage: 'RECRUITER_REVIEW',
+      matchScore: 97, resumeScore: 88, source: 'Naukri', firstSource: 'Naukri',
+      applicationMethod: 'Manual', aiInterviewStatus: 'Completed', aiInterviewScore: 82,
+    },
+  });
+  await prisma.application.create({
+    data: {
+      candidateId: cand2.id, requirementId: req1.id, stage: 'WITH_BDE',
+      matchScore: 90, resumeScore: 84, source: 'LinkedIn', firstSource: 'Naukri',
+      applicationMethod: 'Manual', aiInterviewStatus: 'Completed', aiInterviewScore: 76,
+    },
+  });
+  await prisma.application.create({
+    data: {
+      candidateId: cand3.id, requirementId: req2.id, stage: 'AI_INTERVIEW_SCHEDULED',
+      matchScore: 88, resumeScore: 79, source: 'TeamLink Website', firstSource: 'TeamLink Website',
+      applicationMethod: 'Manual', aiInterviewStatus: 'Scheduled',
+    },
+  });
 
   // HRMS
   const ONBOARDING = ['Offer letter signed', 'ID proof collected', 'PAN card collected', 'Laptop/asset assigned', 'Reporting manager introduction', 'System access provisioned'];
