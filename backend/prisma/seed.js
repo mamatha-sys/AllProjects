@@ -144,8 +144,51 @@ async function main() {
   await prisma.attendance.create({ data: { employeeId: empKiran.id, date: today, status: 'Late', checkIn: '10:20' } });
   await prisma.attendance.create({ data: { employeeId: empDivya.id, date: today, status: 'Present', checkIn: '09:00', checkOut: '18:30' } });
 
-  await prisma.leaveRequest.create({ data: { employeeId: empMeera.id, type: 'Casual Leave', fromDate: '2026-09-25', toDate: '2026-09-26', reason: 'Family function', status: 'Pending' } });
-  await prisma.leaveRequest.create({ data: { employeeId: empKiran.id, type: 'Sick Leave', fromDate: '2026-09-10', toDate: '2026-09-10', reason: 'Fever', status: 'Approved', decidedAt: new Date() } });
+  // Device punches for the last 10 working days, so the Biometric list, the Punch
+  // Log and the monthly report have something real to derive from. Every third day
+  // the check-in is after the 09:30 grace time, which is what makes it Late — and
+  // what turns into half-day cuts once the two free lates a month are used up.
+  const CHECKIN_METHODS = ['Web Check-in', 'Mobile App', 'Biometric (Fingerprint)'];
+  const LOCATIONS = ['Hyderabad HQ', 'Bengaluru Office', 'Remote'];
+  const punchEmployees = [empMeera, empKiran, empDivya];
+  const punchRows = [];
+  const attendanceRows = [];
+  let dayOffset = 1;
+  let workdays = 0;
+  while (workdays < 10) {
+    const d = new Date(Date.now() - dayOffset * 86400000);
+    dayOffset += 1;
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
+    workdays += 1;
+    const iso = d.toISOString().slice(0, 10);
+    punchEmployees.forEach((emp, i) => {
+      const seq = workdays + i;
+      const status = seq % 7 === 0 ? 'Leave' : 'Present';
+      const inTime = seq % 3 === 0 ? '09:47' : '09:12';
+      attendanceRows.push({ employeeId: emp.id, date: iso, status, checkIn: status === 'Leave' ? null : inTime, checkOut: status === 'Leave' ? null : '18:41' });
+      if (status === 'Leave') return;
+      const method = CHECKIN_METHODS[seq % CHECKIN_METHODS.length];
+      const location = LOCATIONS[seq % LOCATIONS.length];
+      punchRows.push({ employeeId: emp.id, date: iso, time: inTime, direction: 'In', method, location });
+      punchRows.push({ employeeId: emp.id, date: iso, time: '18:41', direction: 'Out', method, location });
+    });
+  }
+  await prisma.attendance.createMany({ data: attendanceRows });
+  await prisma.attendancePunch.createMany({ data: punchRows });
+  // Today's punches, matching the three records marked above.
+  await prisma.attendancePunch.createMany({
+    data: [
+      { employeeId: empMeera.id, date: today, time: '09:12', direction: 'In', method: 'Biometric (Fingerprint)', location: 'Hyderabad HQ' },
+      { employeeId: empMeera.id, date: today, time: '18:05', direction: 'Out', method: 'Biometric (Fingerprint)', location: 'Hyderabad HQ' },
+      { employeeId: empKiran.id, date: today, time: '10:20', direction: 'In', method: 'Mobile App', location: 'Remote' },
+      { employeeId: empDivya.id, date: today, time: '09:00', direction: 'In', method: 'Web Check-in', location: 'Bengaluru Office' },
+      { employeeId: empDivya.id, date: today, time: '18:30', direction: 'Out', method: 'Web Check-in', location: 'Bengaluru Office' },
+    ],
+  });
+
+  await prisma.leaveRequest.create({ data: { employeeId: empMeera.id, type: 'Casual Leave', fromDate: '2026-09-25', toDate: '2026-09-26', days: 2, reason: 'Family function', status: 'Pending' } });
+  await prisma.leaveRequest.create({ data: { employeeId: empKiran.id, type: 'Sick Leave', fromDate: '2026-09-10', toDate: '2026-09-10', days: 1, reason: 'Fever', status: 'Approved', decidedAt: new Date(), decidedBy: 'Vasu (Admin)' } });
+  await prisma.leaveRequest.create({ data: { employeeId: empDivya.id, type: 'Casual Leave', fromDate: '2026-10-05', toDate: '2026-10-09', days: 5, reason: 'Vacation', status: 'Approved', decidedAt: new Date(), decidedBy: 'Vasu (Admin)', approvalReason: 'Approved per Company Policy' } });
 
   await prisma.attendanceRegularization.create({ data: { employeeId: empKiran.id, date: today, requestedCheckIn: '09:15', reason: 'Biometric device was offline at the gate.' } });
 
@@ -163,9 +206,28 @@ async function main() {
   const LEAVE_REASONS = ['Medical Emergency', 'Family Function / Event', 'Personal Reasons', 'Approved per Company Policy', 'Other'];
   for (const label of LEAVE_REASONS) await prisma.leaveReason.create({ data: { label } });
 
-  await prisma.holiday.create({ data: { name: 'Diwali', date: '2026-11-08' } });
-  await prisma.holiday.create({ data: { name: 'Republic Day', date: '2027-01-26' } });
-  await prisma.holiday.create({ data: { name: 'Independence Day', date: '2026-08-15' } });
+  await prisma.holiday.create({ data: { name: 'Gandhi Jayanti', date: '2026-10-02', type: 'National Holiday' } });
+  await prisma.holiday.create({ data: { name: 'Diwali', date: '2026-11-08', type: 'Festival' } });
+  await prisma.holiday.create({ data: { name: 'Diwali (2nd day)', date: '2026-11-09', type: 'Festival' } });
+  await prisma.holiday.create({ data: { name: 'Christmas', date: '2026-12-25', type: 'National Holiday' } });
+  await prisma.holiday.create({ data: { name: 'Republic Day', date: '2027-01-26', type: 'National Holiday' } });
+  await prisma.holiday.create({ data: { name: 'Independence Day', date: '2026-08-15', type: 'National Holiday' } });
+
+  // Opening leave balances. `total` is the year's entitlement (a monthly cap is
+  // multiplied out to 12); `taken` is what has already been approved.
+  const allEmployees = [empMeera, empKiran, empDivya, empNewJoiner];
+  const balanceSeed = [
+    { type: 'Casual Leave', total: 12 },
+    { type: 'Sick Leave', total: 12 },
+  ];
+  for (const emp of allEmployees) {
+    for (const b of balanceSeed) {
+      await prisma.leaveBalance.create({ data: { employeeId: emp.id, type: b.type, total: b.total, taken: 0 } });
+    }
+  }
+  // Reflect the two approved leaves seeded above.
+  await prisma.leaveBalance.update({ where: { employeeId_type: { employeeId: empKiran.id, type: 'Sick Leave' } }, data: { taken: 1 } });
+  await prisma.leaveBalance.update({ where: { employeeId_type: { employeeId: empDivya.id, type: 'Casual Leave' } }, data: { taken: 5 } });
 
   // Salary structures (feed the payroll run)
   await prisma.salaryStructure.create({ data: { employeeId: empDivya.id, payMode: 'Package', ctc: 1800000, basic: 75000, hra: 30000, bonus: 6250, specialAllowance: 38750, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 3608 } });
@@ -173,7 +235,14 @@ async function main() {
   await prisma.salaryStructure.create({ data: { employeeId: empMeera.id, payMode: 'Package', ctc: 720000, basic: 30000, hra: 12000, bonus: 2500, specialAllowance: 11500, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 1443 } });
   await prisma.salaryStructure.create({ data: { employeeId: empNewJoiner.id, payMode: 'Stipend', stipend: 25000 } });
 
-  await prisma.payslip.create({ data: { employeeId: empDivya.id, month: '2026-08', basic: 75000, hra: 30000, allowances: 45000, deductions: 2000, netPay: 148000, bonus: 6250, specialAllowance: 38750, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 3608, lopDays: 0 } });
+  await prisma.payslip.create({ data: { employeeId: empDivya.id, month: '2026-08', basic: 75000, hra: 30000, allowances: 45000, deductions: 2000, netPay: 148000, bonus: 6250, specialAllowance: 38750, employerPf: 1800, employeePf: 1800, professionalTax: 200, gratuity: 3608, lopDays: 0, gross: 150000, lateCut: 0, lateDays: 0, payMode: 'Package' } });
+  await prisma.payrollRun.create({
+    data: {
+      month: '2026-08', period: 'August 2026', status: 'Paid', employees: 1,
+      totalGross: 150000, totalDeductions: 2000, totalLateCuts: 0, totalNet: 148000,
+      processedBy: 'Vasu (Admin)', paidAt: new Date('2026-09-01'),
+    },
+  });
 
   // Accounts
   // An invoice is worth amount + GST - TDS: the client deducts TDS at source,
@@ -236,7 +305,20 @@ async function main() {
 
   // EmployeeRecord-backed long tail
   await prisma.employeeRecord.create({ data: { type: 'WEEKLY_IDEA', employeeId: empMeera.id, title: 'Auto-tag candidate source in the weekly recruiter report', detail: 'Would save ~20 min/week of manual tagging.', status: 'Approved' } });
-  await prisma.employeeRecord.create({ data: { type: 'HELPDESK', employeeId: empKiran.id, title: 'Laptop running slow', detail: 'Requesting IT to check disk space.', status: 'Open', category: 'IT', priority: 'Medium' } });
+  await prisma.employeeRecord.create({ data: { type: 'HELPDESK', employeeId: empKiran.id, title: 'Laptop running slow', detail: 'Requesting IT to check disk space.', status: 'Open', category: 'IT Support', priority: 'Medium', assignedTo: empDivya.id, notes: '[]' } });
+  await prisma.employeeRecord.create({ data: { type: 'HELPDESK', employeeId: empMeera.id, title: 'Payslip for August not visible', detail: 'The Payslips tab shows nothing for last month.', status: 'In Progress', category: 'Payroll Query', priority: 'High', assignedTo: empDivya.id, notes: JSON.stringify([{ author: 'Divya Rao', text: 'Checking whether the August run covered this employee.', internal: true }]) } });
+  await prisma.employeeRecord.create({ data: { type: 'HELPDESK', employeeId: empNewJoiner.id, title: 'Access card not working at the Hyderabad gate', detail: 'Card beeps red since Monday.', status: 'Resolved', category: 'Facilities', priority: 'Urgent', resolution: 'Card reissued by facilities; old card deactivated.', resolvedAt: today, csat: 5, escalated: true, notes: '[]' } });
+
+  // One employee already serving notice, so the Resignation screen has a live
+  // notice period to count down and the exit checklist something to sit against.
+  await prisma.employeeRecord.create({
+    data: {
+      type: 'RESIGNATION', employeeId: empKiran.id, title: 'Moving to a product role',
+      detail: 'Offered a platform engineering position elsewhere.', status: 'Notice Period',
+      date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+    },
+  });
+  await prisma.employee.update({ where: { id: empKiran.id }, data: { employmentStatus: 'Notice Period', offboardingStatus: 'Serving Notice' } });
   await prisma.employeeRecord.create({ data: { type: 'ASSET', employeeId: empDivya.id, title: 'Dell Latitude 5420', detail: 'Serial: DL5420-8891', status: 'Assigned', category: 'Laptop', amount: 78000, date: '2022-01-15' } });
   await prisma.employeeRecord.create({ data: { type: 'EXPENSE', employeeId: empKiran.id, title: 'Client site travel', detail: 'Cab fare for Orbit Software client visit', status: 'Pending', category: 'Travel', location: 'Hyderabad', amount: 850, date: today } });
   await prisma.employeeRecord.create({ data: { type: 'TIMESHEET', employeeId: empDivya.id, title: 'Client Portal Revamp', status: 'Logged', hours: 6.5, date: today } });

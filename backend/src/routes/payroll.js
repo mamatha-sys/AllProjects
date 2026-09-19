@@ -2,6 +2,7 @@ const express = require('express');
 const prisma = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
+const { monthStats, monthLabel } = require('../utils/attendanceMath');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -142,13 +143,13 @@ router.patch('/fnf/:id/process', requireRole(...PAYROLL_ROLES), async (req, res)
   res.json(fnf);
 });
 
-// Runs a payroll cycle for every active employee for a given month. Uses each
-// employee's salary structure when set (falling back to a flat default CTC),
-// and prorates pay against that month's attendance per the payroll policy —
-// unmarked/absent working days beyond the paid-leave allowance become loss of pay.
-router.post('/run', requireRole(...PAYROLL_ROLES), async (req, res) => {
-  const { month, defaultCTC } = req.body; // month = "YYYY-MM"
-  if (!month) return res.status(400).json({ error: 'month is required (YYYY-MM)' });
+// ---- Payroll calculation -----------------------------------------------------
+// One function feeds both the preview (Process Payroll → Calculate) and the real
+// run, so what you confirm is exactly what gets written. Pay is prorated against
+// the month's attendance per the payroll policy — unmarked/absent working days
+// beyond the paid-leave allowance become loss of pay — and each late arrival
+// beyond the free monthly allowance costs half a day's pay.
+async function calculatePayroll({ month, department, defaultCTC }) {
   const policy = await getPolicy();
 
   const [year, mo] = month.split('-').map(Number);
@@ -159,42 +160,214 @@ router.post('/run', requireRole(...PAYROLL_ROLES), async (req, res) => {
     if (policy.weekendsPaid || (dow !== 0 && dow !== 6)) workingDays++;
   }
 
-  const employees = await prisma.employee.findMany({ where: { employmentStatus: { in: ['Active', 'Notice Period'] } }, include: { salaryStructure: true } });
-  const payslips = [];
-  for (const emp of employees) {
+  const where = { employmentStatus: { in: ['Active', 'Notice Period'] } };
+  if (department) where.department = department;
+  const employees = await prisma.employee.findMany({ where, include: { salaryStructure: true }, orderBy: { name: 'asc' } });
+  const ids = employees.map((e) => e.id);
+  const [allRecords, allPunches] = await Promise.all([
+    prisma.attendance.findMany({ where: { employeeId: { in: ids }, date: { startsWith: month } } }),
+    prisma.attendancePunch.findMany({ where: { employeeId: { in: ids }, date: { startsWith: month } } }),
+  ]);
+
+  const rows = employees.map((emp) => {
+    const isStipend = emp.salaryStructure?.payMode === 'Stipend';
+    const stipend = Number(emp.salaryStructure?.stipend || 0);
     const ctc = emp.salaryStructure?.payMode === 'Package' ? emp.salaryStructure.ctc : Number(defaultCTC) || 600000;
-    const b = salaryBreakup(ctc, policy);
+    // A stipend is a flat monthly figure with no components and no deductions.
+    const b = isStipend
+      ? { basic: 0, hra: 0, bonus: 0, special: 0, employerPf: 0, employeePf: 0, professionalTax: 0, gratuity: 0, gross: stipend, deductions: 0, net: stipend }
+      : salaryBreakup(ctc, policy);
     const gross = b.gross;
 
-    const records = await prisma.attendance.findMany({ where: { employeeId: emp.id, date: { startsWith: month } } });
+    const records = allRecords.filter((r) => r.employeeId === emp.id);
     const absentDays = records.filter((r) => r.status === 'Absent').length;
-    const markedDays = records.length;
-    const unmarkedDays = policy.unmarkedDaysUnpaid ? Math.max(0, workingDays - markedDays) : 0;
+    const unmarkedDays = policy.unmarkedDaysUnpaid ? Math.max(0, workingDays - records.length) : 0;
     const leaveDays = records.filter((r) => r.status === 'Leave').length;
     const unpaidLeaveDays = Math.max(0, leaveDays - policy.paidLeaveDaysPerMonth);
     const lopDays = absentDays + unmarkedDays + unpaidLeaveDays;
 
     const perDayPay = workingDays ? gross / workingDays : 0;
     const lopDeduction = Math.round(perDayPay * lopDays);
-    const netPay = Math.max(0, gross - b.deductions - lopDeduction);
 
+    const stats = monthStats({
+      month,
+      records,
+      punches: allPunches.filter((p) => p.employeeId === emp.id),
+      cfg: policy,
+    });
+    // Half a day's pay per excess late arrival; a "day" here is net/30.
+    const netBeforeLate = Math.max(0, gross - b.deductions - lopDeduction);
+    const lateCut = Math.round(netBeforeLate / 60) * stats.halfDayCut;
+    const netPay = Math.max(0, netBeforeLate - lateCut);
+
+    return {
+      employeeId: emp.id,
+      employeeCode: emp.employeeCode,
+      name: emp.name,
+      department: emp.department,
+      payMode: isStipend ? 'Stipend' : 'Package',
+      basic: b.basic, hra: b.hra, bonus: b.bonus, specialAllowance: b.special,
+      employerPf: b.employerPf, employeePf: b.employeePf, professionalTax: b.professionalTax, gratuity: b.gratuity,
+      gross, deductions: b.deductions,
+      lopDays, lateDays: stats.late, halfDayCut: stats.halfDayCut, lateCut,
+      netPay,
+    };
+  });
+
+  const totals = rows.reduce((acc, r) => ({
+    employees: acc.employees + 1,
+    gross: acc.gross + r.gross,
+    deductions: acc.deductions + r.deductions,
+    lateCuts: acc.lateCuts + r.lateCut,
+    net: acc.net + r.netPay,
+  }), { employees: 0, gross: 0, deductions: 0, lateCuts: 0, net: 0 });
+
+  return { month, period: monthLabel(month), workingDays, rows, totals };
+}
+
+// Preview a cycle without writing anything — the Calculate step on Process Payroll.
+router.get('/preview', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const month = req.query.month;
+  if (!month) return res.status(400).json({ error: 'month is required (YYYY-MM)' });
+  const existing = await prisma.payrollRun.findUnique({ where: { month } });
+  const preview = await calculatePayroll({ month, department: req.query.department || null, defaultCTC: req.query.defaultCTC });
+  res.json({ ...preview, alreadyProcessed: !!existing, run: existing });
+});
+
+// Runs a payroll cycle for every active employee for a given month, writes a
+// payslip each and records the run so Reports can compare month over month.
+router.post('/run', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const { month, defaultCTC, department } = req.body; // month = "YYYY-MM"
+  if (!month) return res.status(400).json({ error: 'month is required (YYYY-MM)' });
+
+  const existing = await prisma.payrollRun.findUnique({ where: { month } });
+  if (existing && !req.body.rerun) {
+    return res.status(409).json({ error: `Payroll for ${monthLabel(month)} has already been processed.`, run: existing });
+  }
+
+  const { rows, totals, period } = await calculatePayroll({ month, department: department || null, defaultCTC });
+  const payslips = [];
+  for (const r of rows) {
     const slip = await prisma.payslip.upsert({
-      where: { employeeId_month: { employeeId: emp.id, month } },
+      where: { employeeId_month: { employeeId: r.employeeId, month } },
       update: {
-        basic: b.basic, hra: b.hra, allowances: b.bonus + b.special, deductions: b.deductions, netPay,
-        bonus: b.bonus, specialAllowance: b.special, employerPf: b.employerPf, employeePf: b.employeePf,
-        professionalTax: b.professionalTax, gratuity: b.gratuity, lopDays,
+        basic: r.basic, hra: r.hra, allowances: r.bonus + r.specialAllowance, deductions: r.deductions, netPay: r.netPay,
+        bonus: r.bonus, specialAllowance: r.specialAllowance, employerPf: r.employerPf, employeePf: r.employeePf,
+        professionalTax: r.professionalTax, gratuity: r.gratuity, lopDays: r.lopDays,
+        gross: r.gross, lateCut: r.lateCut, lateDays: r.lateDays, payMode: r.payMode,
       },
       create: {
-        employeeId: emp.id, month, basic: b.basic, hra: b.hra, allowances: b.bonus + b.special, deductions: b.deductions, netPay,
-        bonus: b.bonus, specialAllowance: b.special, employerPf: b.employerPf, employeePf: b.employeePf,
-        professionalTax: b.professionalTax, gratuity: b.gratuity, lopDays,
+        employeeId: r.employeeId, month, basic: r.basic, hra: r.hra, allowances: r.bonus + r.specialAllowance,
+        deductions: r.deductions, netPay: r.netPay, bonus: r.bonus, specialAllowance: r.specialAllowance,
+        employerPf: r.employerPf, employeePf: r.employeePf, professionalTax: r.professionalTax, gratuity: r.gratuity,
+        lopDays: r.lopDays, gross: r.gross, lateCut: r.lateCut, lateDays: r.lateDays, payMode: r.payMode,
       },
     });
     payslips.push(slip);
   }
-  await logAudit({ userId: req.user.id, action: 'Payroll run', entity: 'Payslip', entityId: month, toValue: String(payslips.length) + ' payslips' });
-  res.status(201).json({ month, count: payslips.length, payslips });
+
+  const runData = {
+    month, period, department: department || null, status: 'Processing',
+    employees: totals.employees, totalGross: totals.gross, totalDeductions: totals.deductions,
+    totalLateCuts: totals.lateCuts, totalNet: totals.net,
+    processedBy: req.user.name || req.user.email, processedAt: new Date(),
+  };
+  const run = await prisma.payrollRun.upsert({ where: { month }, update: runData, create: runData });
+
+  await logAudit({ userId: req.user.id, action: 'Payroll processed', entity: 'PayrollRun', entityId: run.id, toValue: `${payslips.length} payslips, net ${Math.round(totals.net)}` });
+  res.status(201).json({ month, period, count: payslips.length, run, payslips });
+});
+
+// ---- Payroll runs ----
+
+router.get('/runs', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const runs = await prisma.payrollRun.findMany({ orderBy: { month: 'desc' } });
+  res.json(runs);
+});
+
+router.patch('/runs/:id/paid', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const existing = await prisma.payrollRun.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Payroll run not found' });
+  if (existing.status === 'Paid') return res.status(409).json({ error: 'This run is already marked paid.' });
+  const run = await prisma.payrollRun.update({ where: { id: req.params.id }, data: { status: 'Paid', paidAt: new Date() } });
+  await logAudit({ userId: req.user.id, action: 'Payroll paid', entity: 'PayrollRun', entityId: run.id, fromValue: 'Processing', toValue: 'Paid' });
+  res.json(run);
+});
+
+// ---- Reports: month-over-month comparison, payout by period, payout by department ----
+
+router.get('/reports', requireRole(...PAYROLL_ROLES), async (req, res) => {
+  const runs = await prisma.payrollRun.findMany({ orderBy: { month: 'desc' } });
+  const cfg = await getPolicy();
+  const employees = await prisma.employee.findMany({ where: { employmentStatus: { not: 'Relieved' } }, include: { salaryStructure: true } });
+
+  let comparison = null;
+  if (runs.length >= 2) {
+    const [a, b] = runs;
+    const delta = a.totalNet - b.totalNet;
+    const pct = b.totalNet > 0 ? Math.round((delta / b.totalNet) * 1000) / 10 : 0;
+    comparison = {
+      current: { month: a.month, period: a.period, net: a.totalNet, employees: a.employees },
+      previous: { month: b.month, period: b.period, net: b.totalNet, employees: b.employees },
+      delta, pct, headcountDelta: a.employees - b.employees,
+    };
+  }
+
+  const byDepartment = {};
+  employees.forEach((e) => {
+    const key = e.department || 'Unassigned';
+    const ss = e.salaryStructure;
+    const net = ss?.payMode === 'Stipend' ? Number(ss.stipend || 0) : salaryBreakup(ss?.ctc || 0, cfg).net;
+    if (!byDepartment[key]) byDepartment[key] = { department: key, employees: 0, net: 0 };
+    byDepartment[key].employees += 1;
+    byDepartment[key].net += net;
+  });
+
+  res.json({
+    comparison,
+    byPeriod: runs.map((r) => ({
+      id: r.id, month: r.month, period: r.period, status: r.status, employees: r.employees,
+      gross: r.totalGross, deductions: r.totalDeductions, lateCuts: r.totalLateCuts, net: r.totalNet,
+      processedAt: r.processedAt, paidAt: r.paidAt,
+    })),
+    byDepartment: Object.values(byDepartment).sort((a, b) => b.net - a.net),
+  });
+});
+
+// ---- A single payslip, expanded for the printable view ----
+
+router.get('/payslips/:id', async (req, res) => {
+  const slip = await prisma.payslip.findUnique({ where: { id: req.params.id }, include: { employee: true } });
+  if (!slip) return res.status(404).json({ error: 'Payslip not found' });
+  if (req.user.role === 'EMPLOYEE') {
+    const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });
+    if (!own || own.id !== slip.employeeId) return res.status(403).json({ error: "This isn't included in your role's permissions" });
+  } else if (!PAYROLL_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: "This isn't included in your role's permissions" });
+  }
+  const company = await prisma.company.findFirst();
+  const gross = slip.gross || slip.basic + slip.hra + (slip.bonus || 0) + (slip.specialAllowance || 0);
+  res.json({
+    ...slip,
+    period: monthLabel(slip.month),
+    gross,
+    company: company || { name: 'TeamLink Consultants' },
+    earnings: [
+      { label: 'Basic', amount: slip.basic },
+      { label: 'HRA', amount: slip.hra },
+      { label: 'Bonus', amount: slip.bonus || 0 },
+      { label: 'Special Allowance', amount: slip.specialAllowance || 0 },
+    ],
+    deductionLines: [
+      { label: 'Provident Fund', amount: slip.employeePf || 0 },
+      { label: 'Professional Tax', amount: slip.professionalTax || 0 },
+      ...(slip.lateCut ? [{ label: `Late arrival cut (${slip.lateDays || 0} late day(s))`, amount: slip.lateCut }] : []),
+    ],
+    employerCost: [
+      { label: 'Employer PF', amount: slip.employerPf || 0 },
+      { label: 'Gratuity', amount: slip.gratuity || 0 },
+    ],
+  });
 });
 
 module.exports = router;

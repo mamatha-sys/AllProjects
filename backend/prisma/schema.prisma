@@ -213,6 +213,7 @@ model Employee {
   updatedAt         DateTime @updatedAt
 
   attendance             Attendance[]
+  punches                AttendancePunch[]
   attendanceRegularizations AttendanceRegularization[]
   leaveRequests          LeaveRequest[]
   payslips               Payslip[]
@@ -224,6 +225,7 @@ model Employee {
   acknowledgments        Acknowledgment[]
   salaryStructure        SalaryStructure?
   fnfRequests            FnfRequest[]
+  leaveBalances          LeaveBalance[]
 }
 
 // Generic table backing the smaller, similarly-shaped HRMS self-service areas
@@ -245,6 +247,14 @@ model EmployeeRecord {
   priority   String?  // helpdesk priority: Low | Medium | High | Urgent
   progressPct Int?    // 0-100, for targets/goals
   location   String?  // expense claim location / travel destination
+  // Helpdesk-specific columns (see backend/src/routes/helpdesk.js). Nullable with
+  // defaults so every other record type is unaffected.
+  assignedTo String?  // Employee.id of the agent the ticket is assigned to
+  resolution String?  // resolution note, required when moving to Resolved/Closed
+  resolvedAt String?  // YYYY-MM-DD the ticket was resolved/closed
+  escalated  Boolean  @default(false)
+  csat       Int?     // 1-5 satisfaction rating, set after resolution
+  notes      String?  // JSON array of {author, text, internal}
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
@@ -274,6 +284,24 @@ model Attendance {
   @@unique([employeeId, date])
 }
 
+// One raw device punch. Attendance (above) is the day's *marked* status; punches
+// are the underlying check-in/check-out events a biometric reader, the web app or
+// the mobile app records. First-in / last-out, worked hours and lateness are all
+// derived from these rather than stored — see backend/src/routes/attendance.js.
+model AttendancePunch {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  date       String   // YYYY-MM-DD
+  time       String   // HH:MM, 24-hour
+  direction  String   @default("In") // In | Out
+  method     String   @default("Web Check-in") // Web Check-in | Mobile App | Biometric (Fingerprint)
+  location   String?
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId, date])
+}
+
 // A request to correct a punch after the fact (missing/incorrect check-in or check-out).
 model AttendanceRegularization {
   id               String   @id @default(cuid())
@@ -295,10 +323,31 @@ model LeaveRequest {
   type       String   // Sick | Casual | Earned | Unpaid
   fromDate   String
   toDate     String
+  days       Float?   @default(1) // calendar days applied for — drives the balance decrement
   reason     String?
   status     String   @default("Pending") // Pending | Approved | Rejected | Cancelled
+  // Captured at decision time: approvals of >= HrConfig.leaveReasonThresholdDays must
+  // pick one of the configured LeaveReason labels; rejections must give free text.
+  approvalReason String?
+  rejectReason   String?
+  decidedBy      String?
   createdAt  DateTime @default(now())
   decidedAt  DateTime?
+}
+
+// Per-employee, per-leave-type entitlement ledger. `total` is the entitlement for
+// the current cycle (seeded from the LeaveType cap) and `taken` is incremented when
+// a request is approved, so the Leave Balances report can show remaining/total.
+model LeaveBalance {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  type       String   // LeaveType.name
+  total      Float    @default(0)
+  taken      Float    @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, type])
 }
 
 // Configurable leave policy — types, caps, and the reasons offered when approving.
@@ -322,6 +371,7 @@ model Holiday {
   id        String   @id @default(cuid())
   name      String
   date      String
+  type      String?  @default("Festival") // National Holiday | Festival | Optional
   createdAt DateTime @default(now())
 }
 
@@ -343,9 +393,34 @@ model Payslip {
   professionalTax  Float? @default(0)
   gratuity         Float? @default(0)
   lopDays          Float? @default(0) // loss-of-pay days deducted this cycle
+  gross            Float? @default(0) // basic + hra + bonus + special allowance
+  // Excess late arrivals beyond HrConfig.freeLateArrivalsPerMonth cost half a day's
+  // pay each: lateCut = halfDayCut * round(net / 60). Deducted from netPay.
+  lateCut          Float? @default(0)
+  lateDays         Float? @default(0)
+  payMode          String? @default("Package") // Package | Stipend
   generatedAt DateTime @default(now())
 
   @@unique([employeeId, month])
+}
+
+// One payroll cycle. Created as "Processing" by POST /api/payroll/run and moved to
+// "Paid" by PATCH /api/payroll/runs/:id/paid, giving the Payroll history and the
+// month-over-month comparison on the Reports tab something to read.
+model PayrollRun {
+  id              String   @id @default(cuid())
+  month           String   @unique // YYYY-MM
+  period          String   // "September 2026"
+  department      String?  // null = every department
+  status          String   @default("Processing") // Processing | Paid
+  employees       Int      @default(0)
+  totalGross      Float    @default(0)
+  totalDeductions Float    @default(0)
+  totalLateCuts   Float    @default(0)
+  totalNet        Float    @default(0)
+  processedBy     String?
+  processedAt     DateTime @default(now())
+  paidAt          DateTime?
 }
 
 // One employee's pay structure — either a flat Stipend, or a Package broken
@@ -593,8 +668,14 @@ model HrConfig {
   earliestExcusableEarlyLogout  String @default("17:00")
   // Attendance policy
   graceTimeMinutes              Int    @default(15)
+  // Clock time (HH:MM, 24h) after which a check-in punch counts as late. This is
+  // what the punch log and the monthly report actually compare against;
+  // graceTimeMinutes above stays for the older minutes-after-shift-start reading.
+  graceTime                     String @default("09:30")
   halfDayHours                  Float  @default(4)
   fullDayHours                  Float  @default(8)
+  // Calendar days of notice an employee serves after resigning.
+  noticePeriodDays              Int    @default(45)
   // Payroll policy — how attendance turns into pay
   unmarkedDaysUnpaid            Boolean @default(true)
   weekendsPaid                  Boolean @default(true)
