@@ -14,9 +14,11 @@ router.use(requireAuth);
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
-// Manager/Assistant Manager/STL/TL are themselves employees — they see and act on
-// their own department only. Super Admin/Admin are unrestricted, company-wide.
-const DEPT_SCOPED_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+// STL/TL are themselves employees, scoped to their own department only. Manager
+// and Assistant Manager have cross-department oversight (see Role Catalog) so
+// they get the same unrestricted, company-wide visibility as Super Admin/Admin —
+// including the full Department dropdown when adding an employee.
+const DEPT_SCOPED_ROLES = ['STL', 'TL'];
 
 // Returns the requesting user's own department when their role is department-scoped,
 // or undefined when they have unrestricted (Super Admin/Admin) access.

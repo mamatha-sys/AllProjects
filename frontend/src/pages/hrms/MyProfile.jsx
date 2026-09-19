@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext.jsx';
 
-const DEPT_SCOPED_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+const TEAM_LEAD_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+// Only STL/TL are restricted to their own department — Manager/Assistant
+// Manager have cross-department oversight (matches backend/src/routes/employees.js).
+const DEPT_SCOPED_ROLES = ['STL', 'TL'];
 
 const emptyForm = {
   phone: '', email: '', dateOfBirth: '', gender: '', bloodGroup: '',
@@ -15,7 +18,8 @@ const emptyForm = {
 
 export default function MyProfile() {
   const { user } = useAuth();
-  const isTeamLead = DEPT_SCOPED_ROLES.includes(user?.role);
+  const isTeamLead = TEAM_LEAD_ROLES.includes(user?.role);
+  const isDeptScoped = DEPT_SCOPED_ROLES.includes(user?.role);
   const [employee, setEmployee] = useState(null);
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
@@ -39,8 +43,8 @@ export default function MyProfile() {
       .catch(() => setError('No employee record linked to this account.'));
     api.get('/employees/me/config').then((res) => setConfig(res.data));
     if (isTeamLead) {
-      // Backend already scopes this to the caller's own department for
-      // Manager/Assistant Manager/STL/TL, so this is their team, not the company.
+      // Backend scopes this to the caller's own department for STL/TL; Manager
+      // and Assistant Manager get every employee, company-wide.
       api.get('/employees').then((res) => setTeam(res.data)).catch(() => setTeam([]));
     }
   }
@@ -219,7 +223,7 @@ export default function MyProfile() {
       {isTeamLead && (
         <div className="card section">
           <div className="page-head" style={{ marginBottom: 8 }}>
-            <h3 style={{ fontSize: 13 }}>My Department — {employee.department || 'Unassigned'}</h3>
+            <h3 style={{ fontSize: 13 }}>{isDeptScoped ? `My Department — ${employee.department || 'Unassigned'}` : 'All Employees (cross-department oversight)'}</h3>
             <Link className="btn btn-sm" to="/employees">Open Employee Management</Link>
           </div>
           <div className="tbl-wrap">

@@ -4,9 +4,12 @@ import { useAuth } from '../context/AuthContext.jsx';
 
 const HR_MANAGE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 // Manager/Assistant Manager/STL/TL are themselves employees (with their own
-// profile to fill in) as well as team leads who manage their department's
-// employees — so they get the "My Profile" link that plain HR admins don't.
-const DEPT_SCOPED_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
+// profile to fill in) — so they get the "My Profile" link that plain HR
+// admins don't. This is a nav-only grouping; it's separate from which of
+// these roles are restricted to their own department for data access (see
+// DEPT_SCOPED_ROLES in backend/src/routes/employees.js — Manager/Assistant
+// Manager have cross-department oversight, only STL/TL are department-scoped).
+const TEAM_LEAD_ROLES = ['MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 const ATS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL', 'RECRUITER', 'BDE', 'CLIENT'];
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'CLIENT'];
 const ADMIN_ROLES = ['SUPER_ADMIN', 'ADMIN'];
@@ -42,7 +45,7 @@ const HR_ITEMS_EMPLOYEE = [
 
 function groupsForRole(role) {
   const groups = [];
-  if (DEPT_SCOPED_ROLES.includes(role) || role === 'EMPLOYEE') {
+  if (TEAM_LEAD_ROLES.includes(role) || role === 'EMPLOYEE') {
     groups.push({ label: 'HRMS', items: HR_ITEMS_EMPLOYEE });
   } else if (HR_MANAGE_ROLES.includes(role)) {
     groups.push({ label: 'HRMS', items: HR_ITEMS });
