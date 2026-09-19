@@ -164,6 +164,18 @@ router.patch('/:id/stage', async (req, res) => {
       stage,
       interviewStatus: stage === 'INTERVIEW_SCHEDULED' ? 'SCHEDULED' : stage === 'INTERVIEW_COMPLETED' ? 'COMPLETED' : existing.interviewStatus,
       interviewAt: interviewAt ? new Date(interviewAt) : existing.interviewAt,
+      // Scheduling an interview stamps the calendar columns the Interview
+      // Calendar reads (interview ID, type, who booked it) if they aren't set yet.
+      ...(stage === 'INTERVIEW_SCHEDULED'
+        ? {
+          interviewCode: existing.interviewCode || `INT-${existing.id.slice(-6).toUpperCase()}`,
+          interviewType: existing.interviewType || (existing.requirement.internal ? 'Internal Panel' : 'Client Interview'),
+          interviewCreatedBy: existing.interviewCreatedBy || req.user.name,
+          ...(req.body.interviewer ? { interviewer: req.body.interviewer } : {}),
+          ...(req.body.interviewMode ? { interviewMode: req.body.interviewMode } : {}),
+          ...(req.body.interviewMeetingLink ? { interviewMeetingLink: req.body.interviewMeetingLink } : {}),
+        }
+        : {}),
       ...(req.body.offeredCtc != null && req.body.offeredCtc !== '' ? { offeredCtc: Number(req.body.offeredCtc) } : {}),
       ...(req.body.joiningDate ? { joiningDate: req.body.joiningDate } : {}),
     },
