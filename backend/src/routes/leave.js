@@ -8,6 +8,45 @@ router.use(requireAuth);
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
+// Inclusive calendar-day span of a leave request, used when the client doesn't
+// send an explicit `days` (e.g. a half-day request that overrides it).
+function daySpan(fromDate, toDate) {
+  const from = new Date(fromDate);
+  const to = new Date(toDate || fromDate);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return 1;
+  return Math.max(1, Math.round((to - from) / 86400000) + 1);
+}
+
+async function getConfig() {
+  let cfg = await prisma.hrConfig.findFirst();
+  if (!cfg) cfg = await prisma.hrConfig.create({ data: {} });
+  return cfg;
+}
+
+// A leave type's entitlement expressed as days for the current year, so a monthly
+// cap (e.g. 1 Sick Leave/month) turns into a comparable annual balance.
+function annualEntitlement(type) {
+  if (!type || type.unit === 'unpaid') return 0;
+  return type.unit === 'month' ? Number(type.cap || 0) * 12 : Number(type.cap || 0);
+}
+
+// Balances are created lazily from the active leave types the first time an
+// employee's balance is read or decremented, so adding a leave type later just
+// works and no backfill migration is needed.
+async function ensureBalances(employeeIds) {
+  const types = (await prisma.leaveType.findMany()).filter((t) => t.active);
+  if (!types.length || !employeeIds.length) return;
+  const existing = await prisma.leaveBalance.findMany({ where: { employeeId: { in: employeeIds } } });
+  const have = new Set(existing.map((b) => `${b.employeeId}|${b.type}`));
+  const missing = [];
+  employeeIds.forEach((employeeId) => {
+    types.forEach((t) => {
+      if (!have.has(`${employeeId}|${t.name}`)) missing.push({ employeeId, type: t.name, total: annualEntitlement(t), taken: 0 });
+    });
+  });
+  if (missing.length) await prisma.leaveBalance.createMany({ data: missing });
+}
+
 router.get('/', async (req, res) => {
   const where = {};
   if (req.user.role === 'EMPLOYEE') {
@@ -59,17 +98,122 @@ router.post('/', async (req, res) => {
     const capError = await wouldExceedConcurrentCap(employee, fromDate, toDate);
     if (capError) return res.status(409).json({ error: capError });
   }
-  const leave = await prisma.leaveRequest.create({ data: { employeeId, type, fromDate, toDate, reason } });
+  const days = req.body.days != null ? Number(req.body.days) : daySpan(fromDate, toDate);
+  const leave = await prisma.leaveRequest.create({ data: { employeeId, type, fromDate, toDate, days, reason } });
   await logAudit({ userId: req.user.id, action: 'Leave requested', entity: 'LeaveRequest', entityId: leave.id });
   res.status(201).json(leave);
 });
 
+// Approving a request of leaveReasonThresholdDays or more requires picking one of
+// the configured approval reasons; rejecting always requires free text. Approvals
+// draw the days down from the employee's balance for that leave type.
 router.patch('/:id/decision', requireRole(...HR_ROLES), async (req, res) => {
-  const { status } = req.body; // Approved | Rejected | Cancelled
+  const { status, approvalReason, rejectReason } = req.body; // Approved | Rejected | Cancelled
   if (!['Approved', 'Rejected', 'Cancelled'].includes(status)) return res.status(400).json({ error: 'status must be Approved, Rejected or Cancelled' });
-  const leave = await prisma.leaveRequest.update({ where: { id: req.params.id }, data: { status, decidedAt: new Date() } });
-  await logAudit({ userId: req.user.id, action: 'Leave ' + status.toLowerCase(), entity: 'LeaveRequest', entityId: leave.id, toValue: status });
+  const existing = await prisma.leaveRequest.findUnique({ where: { id: req.params.id } });
+  if (!existing) return res.status(404).json({ error: 'Leave request not found' });
+
+  const cfg = await getConfig();
+  const days = existing.days != null ? existing.days : daySpan(existing.fromDate, existing.toDate);
+
+  if (status === 'Approved') {
+    const reasons = (await prisma.leaveReason.findMany()).filter((r) => r.active);
+    if (days >= cfg.leaveReasonThresholdDays && reasons.length) {
+      if (!approvalReason) return res.status(400).json({ error: `Approvals of ${cfg.leaveReasonThresholdDays} days or more need an approval reason.`, reasons: reasons.map((r) => r.label) });
+      if (!reasons.some((r) => r.label === approvalReason)) return res.status(400).json({ error: 'approvalReason must be one of the configured leave approval reasons', reasons: reasons.map((r) => r.label) });
+    }
+  }
+  if (status === 'Rejected' && !String(rejectReason || '').trim()) {
+    return res.status(400).json({ error: 'A rejection reason is required.' });
+  }
+
+  const leave = await prisma.leaveRequest.update({
+    where: { id: req.params.id },
+    data: {
+      status,
+      decidedAt: new Date(),
+      decidedBy: req.user.name || req.user.email,
+      approvalReason: status === 'Approved' ? approvalReason || null : undefined,
+      rejectReason: status === 'Rejected' ? String(rejectReason).trim() : undefined,
+    },
+  });
+
+  // Draw down on approval; hand the days back if an approved leave is later cancelled.
+  if (status === 'Approved' && existing.status !== 'Approved') {
+    await ensureBalances([existing.employeeId]);
+    const balance = await prisma.leaveBalance.findUnique({ where: { employeeId_type: { employeeId: existing.employeeId, type: existing.type } } });
+    if (balance) await prisma.leaveBalance.update({ where: { id: balance.id }, data: { taken: balance.taken + days } });
+  } else if (status === 'Cancelled' && existing.status === 'Approved') {
+    const balance = await prisma.leaveBalance.findUnique({ where: { employeeId_type: { employeeId: existing.employeeId, type: existing.type } } });
+    if (balance) await prisma.leaveBalance.update({ where: { id: balance.id }, data: { taken: Math.max(0, balance.taken - days) } });
+  }
+
+  await logAudit({ userId: req.user.id, action: 'Leave ' + status.toLowerCase(), entity: 'LeaveRequest', entityId: leave.id, fromValue: existing.status, toValue: status });
   res.json(leave);
+});
+
+// ---- Balances ----
+// remaining = total - taken, per active leave type. Employees see their own row.
+
+router.get('/balances', async (req, res) => {
+  const types = (await prisma.leaveType.findMany({ orderBy: { name: 'asc' } })).filter((t) => t.active);
+  let employees;
+  if (req.user.role === 'EMPLOYEE') {
+    const own = await prisma.employee.findUnique({ where: { userId: req.user.id } });
+    employees = own ? [own] : [];
+  } else {
+    employees = await prisma.employee.findMany({ where: { employmentStatus: { not: 'Relieved' } }, orderBy: { name: 'asc' } });
+  }
+  await ensureBalances(employees.map((e) => e.id));
+  const balances = await prisma.leaveBalance.findMany({ where: { employeeId: { in: employees.map((e) => e.id) } } });
+
+  res.json({
+    types: types.map((t) => ({ code: t.code, name: t.name, cap: t.cap, unit: t.unit, carries: t.carries })),
+    rows: employees.map((e) => ({
+      employeeId: e.id,
+      employeeCode: e.employeeCode,
+      name: e.name,
+      department: e.department,
+      balances: types.map((t) => {
+        const b = balances.find((x) => x.employeeId === e.id && x.type === t.name);
+        return b
+          ? { type: t.name, code: t.code, total: b.total, taken: b.taken, remaining: Math.max(0, b.total - b.taken) }
+          : { type: t.name, code: t.code, total: null, taken: null, remaining: null };
+      }),
+    })),
+  });
+});
+
+// Adjust an employee's entitlement for one leave type (e.g. an opening balance
+// carried over from last year).
+router.put('/balances/:employeeId', requireRole('SUPER_ADMIN', 'ADMIN'), async (req, res) => {
+  const { type, total, taken } = req.body;
+  if (!type) return res.status(400).json({ error: 'type is required' });
+  const balance = await prisma.leaveBalance.upsert({
+    where: { employeeId_type: { employeeId: req.params.employeeId, type } },
+    update: { total: total != null ? Number(total) : undefined, taken: taken != null ? Number(taken) : undefined },
+    create: { employeeId: req.params.employeeId, type, total: Number(total) || 0, taken: Number(taken) || 0 },
+  });
+  await logAudit({ userId: req.user.id, action: 'Leave balance adjusted', entity: 'LeaveBalance', entityId: balance.id, toValue: `${type}: ${balance.taken}/${balance.total}` });
+  res.json(balance);
+});
+
+// ---- Department-wise "who is on leave today" ----
+
+router.get('/on-leave-today', requireRole(...HR_ROLES), async (req, res) => {
+  const today = req.query.date || new Date().toISOString().slice(0, 10);
+  const employees = await prisma.employee.findMany({ where: { employmentStatus: { not: 'Relieved' } } });
+  const approved = await prisma.leaveRequest.findMany({
+    where: { status: 'Approved', fromDate: { lte: today }, toDate: { gte: today } },
+    include: { employee: true },
+  });
+  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  res.json({
+    date: today,
+    total: approved.length,
+    departments: departments.map((d) => ({ department: d, onLeave: approved.filter((l) => l.employee?.department === d).length })),
+    employees: approved.map((l) => ({ id: l.id, name: l.employee?.name, department: l.employee?.department, type: l.type, fromDate: l.fromDate, toDate: l.toDate })),
+  });
 });
 
 // Employee requests cancellation of an already-approved leave; HR decides via /decision above.
@@ -154,11 +298,19 @@ router.get('/holidays', async (req, res) => {
 });
 
 router.post('/holidays', requireRole(...HR_ROLES), async (req, res) => {
-  const { name, date } = req.body;
+  const { name, date, type } = req.body;
   if (!name || !date) return res.status(400).json({ error: 'name and date are required' });
-  const holiday = await prisma.holiday.create({ data: { name, date } });
-  await logAudit({ userId: req.user.id, action: 'Holiday added', entity: 'Holiday', entityId: holiday.id });
+  const holiday = await prisma.holiday.create({ data: { name, date, type: type || 'Festival' } });
+  await logAudit({ userId: req.user.id, action: 'Holiday added', entity: 'Holiday', entityId: holiday.id, toValue: `${name} (${date})` });
   res.status(201).json(holiday);
+});
+
+router.delete('/holidays/:id', requireRole(...HR_ROLES), async (req, res) => {
+  const holiday = await prisma.holiday.findUnique({ where: { id: req.params.id } });
+  if (!holiday) return res.status(404).json({ error: 'Holiday not found' });
+  await prisma.holiday.delete({ where: { id: req.params.id } });
+  await logAudit({ userId: req.user.id, action: 'Holiday removed', entity: 'Holiday', entityId: req.params.id, fromValue: `${holiday.name} (${holiday.date})` });
+  res.json({ ok: true });
 });
 
 module.exports = router;

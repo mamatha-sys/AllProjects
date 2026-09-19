@@ -27,6 +27,9 @@ const officeRoutes = require('./routes/office');
 const atsExtrasRoutes = require('./routes/atsExtras');
 const employeeRecordRouter = require('./routes/employeeRecords');
 const shiftPatternRoutes = require('./routes/shiftPatterns');
+const helpdeskRoutes = require('./routes/helpdesk');
+const resignationRoutes = require('./routes/resignations');
+const hrmsDashboardRoutes = require('./routes/hrmsDashboard');
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
@@ -59,18 +62,22 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/office-expenses', officeRoutes);
 app.use('/api/ats', atsExtrasRoutes);
+app.use('/api/hrms/dashboard', hrmsDashboardRoutes);
 
 // EmployeeRecord-backed HRMS long-tail areas — one generic model, one route per type.
+// Helpdesk and Resignation still store EmployeeRecord rows but have their own
+// routers, because they carry real workflow (SLA/escalation/CSAT; notice period
+// and the employment-status mirror) that the generic CRUD router can't express.
 app.use('/api/kt', employeeRecordRouter('KT'));
 app.use('/api/targets', employeeRecordRouter('TARGET', { createRoles: HR_ROLES }));
-app.use('/api/resignations', employeeRecordRouter('RESIGNATION'));
+app.use('/api/resignations', resignationRoutes);
 app.use('/api/recognition', employeeRecordRouter('RECOGNITION', { createRoles: HR_ROLES }));
 app.use('/api/disciplinary', employeeRecordRouter('DISCIPLINARY', { createRoles: HR_ROLES }));
 app.use('/api/shift-roster', employeeRecordRouter('SHIFT'));
 app.use('/api/timesheet', employeeRecordRouter('TIMESHEET'));
 app.use('/api/assets', employeeRecordRouter('ASSET', { createRoles: HR_ROLES }));
 app.use('/api/expenses', employeeRecordRouter('EXPENSE'));
-app.use('/api/helpdesk', employeeRecordRouter('HELPDESK'));
+app.use('/api/helpdesk', helpdeskRoutes);
 app.use('/api/access-requests', employeeRecordRouter('ACCESS_REQUEST'));
 app.use('/api/weekly-ideas', employeeRecordRouter('WEEKLY_IDEA'));
 app.use('/api/shift-patterns', shiftPatternRoutes);
