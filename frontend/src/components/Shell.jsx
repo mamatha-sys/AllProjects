@@ -64,6 +64,7 @@ function groupsForRole(role) {
       label: 'Administration',
       items: [
         { to: '/admin/company', label: 'Company Setup', icon: '⚙️' },
+        { to: '/employees', label: 'Employee Management', icon: '🧑‍💼' },
         { to: '/admin/users', label: 'Users', icon: '👥' },
         { to: '/admin/roles', label: 'Role Catalog', icon: '🔐' },
         { to: '/admin/integrations', label: 'Integrations', icon: '🔌' },
