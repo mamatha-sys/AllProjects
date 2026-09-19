@@ -111,7 +111,7 @@ export default function EmployeeDetail() {
           {employee.pendingChanges.map((c, i) => (
             <div className="kv" key={i}><span className="k">{c.label}</span><span>{c.from || '—'} → {c.to}</span></div>
           ))}
-          {isHR && (
+          {isAdmin && (
             <div style={{ marginTop: 10 }}>
               <button className="btn btn-primary btn-sm" onClick={() => decideChanges('approve')}>Approve (locks profile)</button>{' '}
               <button className="btn btn-sm" onClick={() => decideChanges('reject')}>Send back</button>
@@ -125,7 +125,7 @@ export default function EmployeeDetail() {
           <h3>Edit access requested</h3>
           <div className="kv"><span className="k">Reason</span><span>{employee.unlockRequestReason}</span></div>
           <div className="small-muted">Request {employee.unlockRequestCount} of 3 for this employee.</div>
-          {isHR && (
+          {isAdmin && (
             <div style={{ marginTop: 10 }}>
               <button className="btn btn-primary btn-sm" onClick={() => decideUnlock('approve')}>Grant Edit Access</button>{' '}
               <button className="btn btn-sm" onClick={() => decideUnlock('reject')}>Deny</button>

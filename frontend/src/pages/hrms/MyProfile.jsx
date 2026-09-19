@@ -123,8 +123,8 @@ export default function MyProfile() {
         </div>
       )}
 
-      {editable && (
-        <form className="card section" onSubmit={submit}>
+      <form className="card section" onSubmit={submit}>
+        <fieldset disabled={!editable} style={{ border: 'none', padding: 0, margin: 0 }}>
           <h3>Personal Information</h3>
           <div className="grid-2">
             <label className="field"><span>Phone</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
@@ -201,10 +201,11 @@ export default function MyProfile() {
             <label className="field"><span>ESI number</span><input value={form.esiNumber} onChange={(e) => setForm({ ...form, esiNumber: e.target.value })} /></label>
           </div>
 
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} type="submit">Submit for Review</button>
+          {editable && <button className="btn btn-primary btn-sm" style={{ marginTop: 12 }} type="submit">Submit for Review</button>}
           {message && <span className="small-muted" style={{ marginLeft: 10 }}>{message}</span>}
-        </form>
-      )}
+        </fieldset>
+      </form>
+      {!editable && <div className="small-muted" style={{ marginTop: -10, marginBottom: 16 }}>🔒 This form is locked and can't be edited right now.</div>}
 
       <div className="card">
         <h3 style={{ fontSize: 13, marginBottom: 8 }}>Read-only details (set by HR)</h3>
