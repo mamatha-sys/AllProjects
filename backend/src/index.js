@@ -31,6 +31,7 @@ const helpdeskRoutes = require('./routes/helpdesk');
 const resignationRoutes = require('./routes/resignations');
 const hrmsDashboardRoutes = require('./routes/hrmsDashboard');
 const integrationRoutes = require('./routes/integrations');
+const accountsDashboardRoutes = require('./routes/accountsDashboard');
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
@@ -65,6 +66,7 @@ app.use('/api/office-expenses', officeRoutes);
 app.use('/api/ats', atsExtrasRoutes);
 app.use('/api/hrms/dashboard', hrmsDashboardRoutes);
 app.use('/api/integrations', integrationRoutes);
+app.use('/api/accounts-dashboard', accountsDashboardRoutes);
 
 // EmployeeRecord-backed HRMS long-tail areas — one generic model, one route per type.
 // Helpdesk and Resignation still store EmployeeRecord rows but have their own

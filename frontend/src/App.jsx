@@ -25,6 +25,7 @@ import EmployeeServices from './pages/hrms/EmployeeServices.jsx';
 import MyProfile from './pages/hrms/MyProfile.jsx';
 
 import Invoices from './pages/Invoices.jsx';
+import AccountsDashboardPage from './pages/accounts/AccountsDashboardPage.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
 import Bank from './pages/Bank.jsx';
 import Office from './pages/Office.jsx';
@@ -95,6 +96,7 @@ export default function App() {
         <Route path="ats/search" element={<Search />} />
 
         {/* Accounts */}
+        <Route path="accounts-dashboard" element={<AccountsDashboardPage />} />
         <Route path="invoices" element={<Invoices />} />
         <Route path="invoices/:id" element={<InvoiceDetail />} />
         <Route path="bank" element={<Bank />} />

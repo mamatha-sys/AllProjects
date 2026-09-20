@@ -66,6 +66,7 @@ function groupsForRole(role) {
     groups.push({
       label: 'Accounts',
       items: [
+        { to: '/accounts-dashboard', label: 'Accounts Dashboard', icon: '▦' },
         { to: '/invoices', label: 'Invoices', icon: '🧾' },
         { to: '/office', label: 'Office / Business', icon: '🏬' },
         { to: '/bank', label: 'Bank & Reconciliation', icon: '🏦' },

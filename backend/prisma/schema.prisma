@@ -137,6 +137,7 @@ model Requirement {
   clientId      String
   client        Client             @relation(fields: [clientId], references: [id])
   department    String?
+  section       String? // Accounts Dashboard/Work page "Section" filter — a sub-grouping within department
   priority      String             @default("Medium")
   status        String             @default("OPEN") // DRAFT | OPEN | CLOSED
   skills        String? // comma-separated MANDATORY skills, drives candidate matching + JD
