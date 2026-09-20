@@ -34,6 +34,69 @@ async function loadTxn(id) {
   return prisma.bankTransaction.findUnique({ where: { id } });
 }
 
+// Shared by the manual "/:id/match" + "/:id/reconcile" routes and by
+// auto-post-on-import — one credit line, matched then settled against the
+// invoice it confidently belongs to, with the same double-claim guard
+// either way so an invoice is never posted against twice.
+async function applyMatch(txn, invoice, who) {
+  const claimed = await prisma.bankTransaction.findFirst({
+    where: { matchedInvoiceId: invoice.id, id: { not: txn.id }, reconStatus: { in: ['Matched', 'Reconciled'] } },
+  });
+  if (claimed) return null;
+  return prisma.bankTransaction.update({
+    where: { id: txn.id },
+    data: {
+      matched: true,
+      matchedInvoiceId: invoice.id,
+      reconStatus: 'Matched',
+      matchedBy: who,
+      matchedDate: toIsoDate(new Date()),
+      clientName: invoice.client?.name || null,
+    },
+  });
+}
+
+async function applyReconcile(txn, invoice, who) {
+  const outstanding = invoiceOutstanding(invoice);
+  const applied = ROUND(Math.min(Number(txn.amount || 0), outstanding));
+  const unallocated = ROUND(Number(txn.amount || 0) - applied);
+  await prisma.invoicePayment.create({
+    data: {
+      invoiceId: invoice.id,
+      date: txn.date,
+      amount: applied,
+      method: 'Bank Transfer',
+      reference: txn.reference || null,
+      notes: `Bank statement · ${txn.description}${unallocated > 0.5 ? ` · ₹${unallocated} left unallocated` : ''}`,
+      bankTxnId: txn.id,
+      recordedBy: who,
+    },
+  });
+  const received = ROUND(Number(invoice.receivedAmount || 0) + applied);
+  const status = deriveInvoiceStatus({ ...invoice, receivedAmount: received });
+  await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: { receivedAmount: received, status, paidDate: status === 'Paid' ? txn.date : invoice.paidDate, bankTxnId: txn.id },
+  });
+  return prisma.bankTransaction.update({ where: { id: txn.id }, data: { reconStatus: 'Reconciled', matched: true } });
+}
+
+// Only auto-posted when the amount is (near enough) an exact match to one
+// open invoice's outstanding balance — the same suggestion the UI would
+// show, but tight enough that nobody has to glance at it first. Anything
+// looser is left as a "Suggested" line for a human to confirm.
+const AUTO_POST_TOLERANCE = 1; // ₹ — covers rounding only, not a real ambiguity
+async function tryAutoPost(txn, who) {
+  if (txn.type !== 'Credit') return null;
+  const invoices = await prisma.invoice.findMany({ include: { client: true } });
+  const suggestion = suggestInvoiceFor(txn, invoices);
+  if (!suggestion || suggestion.diff > AUTO_POST_TOLERANCE) return null;
+  const matched = await applyMatch(txn, suggestion.invoice, who);
+  if (!matched) return null;
+  const reconciled = await applyReconcile(matched, suggestion.invoice, who);
+  return { invoice: suggestion.invoice, txn: reconciled };
+}
+
 // Attach the derived state and, for anything still to be matched, the invoice
 // the matching rules would suggest.
 function decorate(txn, invoiceById, suggestion) {
@@ -133,8 +196,26 @@ router.post('/import', async (req, res) => {
     seen.add(k);
     created.push(await prisma.bankTransaction.create({ data: row }));
   }
-  await logAudit({ userId: req.user.id, action: 'Bank statement imported', entity: 'BankTransaction', entityId: batch, toValue: `${created.length} imported, ${skipped.length} skipped` });
-  res.status(201).json({ batch, imported: created.length, duplicates: skipped.length, skipped, transactions: created });
+
+  // Auto-post: every newly imported credit that matches one open invoice's
+  // outstanding balance almost exactly is matched AND reconciled immediately
+  // — no separate click. Anything looser (ambiguous, partial, no invoice
+  // close enough) is left "Suggested" for the accountant to confirm by hand,
+  // same as it always was.
+  let autoPosted = 0;
+  if (req.body?.autoPost) {
+    const who = actor(req);
+    for (let i = 0; i < created.length; i += 1) {
+      const result = await tryAutoPost(created[i], who);
+      if (result) { created[i] = result.txn; autoPosted += 1; }
+    }
+  }
+
+  await logAudit({
+    userId: req.user.id, action: 'Bank statement imported', entity: 'BankTransaction', entityId: batch,
+    toValue: `${created.length} imported, ${skipped.length} skipped${autoPosted ? `, ${autoPosted} auto-reconciled` : ''}`,
+  });
+  res.status(201).json({ batch, imported: created.length, duplicates: skipped.length, autoPosted, skipped, transactions: created });
 });
 
 // Match to an invoice. With an invoiceId this is the manual match; without one

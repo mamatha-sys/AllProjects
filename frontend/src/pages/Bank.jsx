@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api';
+import { readFilesAsCsvText } from '../utils/fileImport.js';
 
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 
@@ -25,6 +26,8 @@ export default function Bank() {
   const [csv, setCsv] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [dupes, setDupes] = useState(null);
+  const [autoPost, setAutoPost] = useState(true);
+  const [filesBusy, setFilesBusy] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([
@@ -75,13 +78,51 @@ export default function Bank() {
     setError('');
     setNote('');
     try {
-      const res = await api.post('/bank/import', { csv });
-      setNote(`${res.data.imported} line(s) imported, ${res.data.duplicates} already on file.`);
+      const res = await api.post('/bank/import', { csv, autoPost });
+      setNote(importSummary(res.data));
       setCsv('');
       setShowImport(false);
       load();
     } catch (e) {
       setError(e.response?.data?.error || 'Import failed.');
+    }
+  }
+
+  function importSummary(data) {
+    return `${data.imported} line(s) imported, ${data.duplicates} already on file`
+      + (data.autoPosted ? `, ${data.autoPosted} auto-reconciled against a matching invoice` : '') + '.';
+  }
+
+  // Real uploaded files (.csv or .xlsx/.xls, one or many at once) — each is
+  // read client-side and sent through the same /bank/import endpoint the
+  // pasted-CSV box uses, so a statement from the bank's own export works
+  // exactly like typing it in by hand.
+  async function runFileImport(fileList) {
+    const files = [...fileList];
+    if (!files.length) return;
+    setError('');
+    setNote('');
+    setFilesBusy(true);
+    try {
+      const parsed = await readFilesAsCsvText(files);
+      let imported = 0; let duplicates = 0; let posted = 0; let failed = 0;
+      for (const f of parsed) {
+        try {
+          const res = await api.post('/bank/import', { csv: f.csv, autoPost });
+          imported += res.data.imported;
+          duplicates += res.data.duplicates;
+          posted += res.data.autoPosted || 0;
+        } catch (e) {
+          failed += 1;
+        }
+      }
+      setNote(importSummary({ imported, duplicates, autoPosted: posted }) + (failed ? ` ${failed} file(s) could not be read.` : ''));
+      setShowImport(false);
+      load();
+    } catch (e) {
+      setError('Could not read one of those files.');
+    } finally {
+      setFilesBusy(false);
     }
   }
 
@@ -116,9 +157,27 @@ export default function Bank() {
         <div className="card section">
           <h3>Import a bank statement</h3>
           <div className="small-muted" style={{ marginBottom: 8 }}>
-            Paste the CSV exported from net banking. A header row naming a date and an amount
-            (or separate debit and credit) column is all it needs. Lines already on file are skipped.
+            Upload the statement file(s) exported from net banking (.csv, .xlsx or .xls — pick several at
+            once to import them all in one go), or paste the CSV text below instead. A header row naming
+            a date and an amount (or separate debit and credit) column is all it needs. Lines already on
+            file are skipped.
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, fontWeight: 600, fontSize: 13 }}>
+            <input type="checkbox" checked={autoPost} onChange={(e) => setAutoPost(e.target.checked)} />
+            Auto-reconcile credits that match an invoice's outstanding amount exactly
+          </label>
+          <div className="small-muted" style={{ marginTop: -6, marginBottom: 10 }}>
+            Anything not an exact, unambiguous match is left as a "Suggested" line for you to confirm — this never guesses on a close-but-not-exact amount.
+          </div>
+          <input
+            type="file"
+            accept=".csv,.txt,.xlsx,.xls"
+            multiple
+            disabled={filesBusy}
+            onChange={(e) => { if (e.target.files.length) runFileImport(e.target.files); e.target.value = ''; }}
+          />
+          {filesBusy && <div className="small-muted" style={{ marginTop: 6 }}>Reading file(s)…</div>}
+          <div className="small-muted" style={{ margin: '12px 0 6px' }}>— or paste CSV text —</div>
           <textarea
             rows={6}
             style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}

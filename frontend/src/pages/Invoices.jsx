@@ -6,6 +6,7 @@ import PeriodPicker from '../components/PeriodPicker.jsx';
 import InvoicePrintModal from '../components/InvoicePrintModal.jsx';
 import { downloadCsv } from '../utils/csv.js';
 import { resolvePeriod } from '../utils/period.js';
+import { readFilesAsCsvText } from '../utils/fileImport.js';
 
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 const STATUSES = ['All', 'Pending', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'];
@@ -75,6 +76,7 @@ export default function Invoices() {
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importNote, setImportNote] = useState('');
+  const [importBusy, setImportBusy] = useState(false);
 
   const load = useCallback(() => {
     api.get('/invoices').then((res) => setInvoices(res.data));
@@ -292,11 +294,9 @@ export default function Invoices() {
     }
   }
 
-  async function runImport() {
-    setImportNote('');
-    setError('');
-    const lines = importText.trim().split(/\r?\n/).filter(Boolean);
-    if (!lines.length) return;
+  async function importRows(text) {
+    const lines = text.trim().split(/\r?\n/).filter(Boolean);
+    if (!lines.length) return { created: 0, skipped: 0 };
     const header = lines[0].toLowerCase();
     const body = header.includes('client') ? lines.slice(1) : lines;
     let created = 0; let skipped = 0;
@@ -314,8 +314,40 @@ export default function Invoices() {
         skipped += 1;
       }
     }
+    return { created, skipped };
+  }
+
+  async function runImport() {
+    setImportNote('');
+    setError('');
+    const { created, skipped } = await importRows(importText);
     setImportNote(`${created} row(s) imported${skipped ? `, ${skipped} skipped (client not found or missing amount/date)` : ''}.`);
     if (created) load();
+  }
+
+  // Real uploaded files (.csv/.xlsx/.xls, one or many at once) — each file is
+  // read client-side and run through the same row importer the pasted-text
+  // box uses, so selecting several files imports all of them in one go.
+  async function runFileImport(fileList) {
+    const files = [...fileList];
+    if (!files.length) return;
+    setImportNote('');
+    setError('');
+    setImportBusy(true);
+    try {
+      const parsed = await readFilesAsCsvText(files);
+      let created = 0; let skipped = 0;
+      for (const f of parsed) {
+        const r = await importRows(f.csv);
+        created += r.created; skipped += r.skipped;
+      }
+      setImportNote(`${created} row(s) imported${skipped ? `, ${skipped} skipped (client not found or missing amount/date)` : ''}.`);
+      if (created) load();
+    } catch (e) {
+      setError('Could not read one of those files.');
+    } finally {
+      setImportBusy(false);
+    }
   }
 
   return (
@@ -425,8 +457,19 @@ export default function Invoices() {
         <div className="card section" style={{ borderColor: 'var(--accent)' }}>
           <h3>Import Excel</h3>
           <div className="small-muted" style={{ marginBottom: 8 }}>
-            Paste rows as CSV — one join per line: <code>Client name, Candidate name, Join date (YYYY-MM-DD), Amount, GST %, TDS %</code>. A header row is optional and skipped automatically. Each row is created the same way as "＋ New join".
+            Upload file(s) — .csv, .xlsx or .xls, pick several at once to import them all — or paste rows as
+            CSV below. One join per line: <code>Client name, Candidate name, Join date (YYYY-MM-DD), Amount, GST %, TDS %</code>.
+            A header row is optional and skipped automatically. Each row is created the same way as "＋ New join".
           </div>
+          <input
+            type="file"
+            accept=".csv,.txt,.xlsx,.xls"
+            multiple
+            disabled={importBusy}
+            onChange={(e) => { if (e.target.files.length) runFileImport(e.target.files); e.target.value = ''; }}
+          />
+          {importBusy && <div className="small-muted" style={{ marginTop: 6 }}>Reading file(s)…</div>}
+          <div className="small-muted" style={{ margin: '12px 0 6px' }}>— or paste CSV text —</div>
           <textarea rows={5} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}
             placeholder={'Client,Candidate,Join Date,Amount,GST%,TDS%\nOrbit Software Solutions,Asha Rao,2026-09-20,150000,18,10'}
             value={importText} onChange={(e) => setImportText(e.target.value)} />
