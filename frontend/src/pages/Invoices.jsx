@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import PeriodPicker from '../components/PeriodPicker.jsx';
+import InvoicePrintModal from '../components/InvoicePrintModal.jsx';
 
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 const STATUSES = ['All', 'Pending', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'];
@@ -46,6 +47,8 @@ export default function Invoices() {
   const [newViewName, setNewViewName] = useState('');
   const [tdsTarget, setTdsTarget] = useState(null);
   const [tdsForm, setTdsForm] = useState({ status: 'Not received', certNumber: '', certDate: '', quarter: '', amount: '', notes: '' });
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [printTarget, setPrintTarget] = useState(null);
 
   const load = useCallback(() => {
     api.get('/invoices').then((res) => setInvoices(res.data));
@@ -101,6 +104,44 @@ export default function Invoices() {
       map.set(key, cur);
     });
     grouped = [...map.values()].sort((a, b) => b.pending - a.pending);
+  }
+
+  // Every candidate who joined the same client in the same month shares one
+  // invoice number (assigned automatically when ATS records the join) — the
+  // main table lists one row per invoice number, matching the reference
+  // Work page, with the underlying candidate rows visible on expand.
+  const invoiceGroupMap = new Map();
+  scopedRows.forEach((i) => {
+    const key = i.invoiceNumber || `__row_${i.id}`;
+    const cur = invoiceGroupMap.get(key) || {
+      key, invoiceNumber: i.invoiceNumber, invoiceDate: i.invoiceDate, dueDate: i.dueDate,
+      client: i.client, rows: [], before: 0, gst: 0, tds: 0, total: 0, received: 0, pending: 0,
+    };
+    cur.rows.push(i);
+    cur.before += Number(i.amount || 0);
+    cur.gst += Number(i.gst || 0);
+    cur.tds += Number(i.tds || 0);
+    cur.total += i.total;
+    cur.received += Number(i.receivedAmount || 0);
+    cur.pending += i.outstanding;
+    if (i.invoiceDate < cur.invoiceDate) cur.invoiceDate = i.invoiceDate;
+    invoiceGroupMap.set(key, cur);
+  });
+  const invoiceGroups = [...invoiceGroupMap.values()].sort((a, b) => (b.invoiceDate || '').localeCompare(a.invoiceDate || ''));
+
+  function groupStatus(g) {
+    if (g.rows.every((r) => r.status === 'Cancelled')) return 'Cancelled';
+    if (g.pending <= 0.5) return 'Paid';
+    if (g.rows.some((r) => r.status === 'Overdue')) return 'Overdue';
+    if (g.received > 0.5) return 'Partially Paid';
+    return 'Pending';
+  }
+  function toggleExpand(key) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   }
 
   async function saveView(e) {
@@ -214,44 +255,95 @@ export default function Invoices() {
         <table>
           <thead>
             <tr>
-              <th>Invoice</th><th>Client</th><th>Candidate</th>
-              <th>Amount</th><th>GST</th><th>TDS</th><th>Total</th>
-              <th>Received</th><th>Outstanding</th><th>Status</th><th>Due</th>
-              {canManage && <th></th>}
+              <th></th><th>Invoice</th><th>Invoice Date</th><th>Client</th><th>Candidates</th>
+              <th>Before GST</th><th>GST</th><th>After GST</th><th>TDS</th>
+              <th>Received</th><th>Pending</th><th>Status</th><th>Due</th><th></th>
             </tr>
           </thead>
           <tbody>
-            {scopedRows.map((i) => (
-              <tr key={i.id}>
-                <td><Link to={`/invoices/${i.id}`}>{i.invoiceNumber || i.id.slice(-6)}</Link></td>
-                <td>{i.client?.name}</td>
-                <td>{i.candidate?.name || i.candidateName || '—'}</td>
-                <td>{money(i.amount)}</td>
-                <td>{money(i.gst)}</td>
-                <td>−{money(i.tds)}</td>
-                <td style={{ fontWeight: 600 }}>{money(i.total)}</td>
-                <td>{money(i.receivedAmount)}</td>
-                <td>{money(i.outstanding)}</td>
-                <td><span className={`status ${statusClass(i.status)}`}>{i.status}</span></td>
-                <td>{i.dueDate || '—'}</td>
-                {canManage && (
-                  <td>
-                    {i.outstanding > 0.5 && i.status !== 'Cancelled' && (
-                      <button className="btn btn-sm" onClick={() => markPaid(i.id)}>Settle in full</button>
-                    )}{' '}
-                    {i.tds > 0.5 && (
-                      <button className="btn btn-sm" onClick={() => openTds(i)}>
-                        {i.tdsCertificate?.status === 'Received' ? '✓ TDS cert' : 'TDS certificate'}
-                      </button>
-                    )}
-                  </td>
-                )}
-              </tr>
-            ))}
-            {scopedRows.length === 0 && <tr><td colSpan={canManage ? 12 : 11} className="small-muted">No invoices in this state.</td></tr>}
+            {invoiceGroups.map((g) => {
+              const isOpen = expanded.has(g.key);
+              const status = groupStatus(g);
+              return (
+                <Fragment key={g.key}>
+                  <tr>
+                    <td>
+                      {g.rows.length > 1 && (
+                        <button className="link-btn" onClick={() => toggleExpand(g.key)} title="Show candidates on this invoice">{isOpen ? '▾' : '▸'}</button>
+                      )}
+                    </td>
+                    <td>
+                      {g.invoiceNumber ? (
+                        <button className="link-btn" onClick={() => setPrintTarget(g.invoiceNumber)}>{g.invoiceNumber}</button>
+                      ) : (
+                        <Link to={`/invoices/${g.rows[0].id}`}>{g.rows[0].id.slice(-6)}</Link>
+                      )}
+                    </td>
+                    <td>{g.invoiceDate}</td>
+                    <td>{g.client?.name}</td>
+                    <td>{g.rows.length}</td>
+                    <td>{money(g.before)}</td>
+                    <td>{money(g.gst)}</td>
+                    <td style={{ fontWeight: 600 }}>{money(g.before + g.gst)}</td>
+                    <td>−{money(g.tds)}</td>
+                    <td>{money(g.received)}</td>
+                    <td style={{ fontWeight: 700 }}>{money(g.pending)}</td>
+                    <td><span className={`status ${statusClass(status)}`}>{status}</span></td>
+                    <td>{g.dueDate || '—'}</td>
+                    <td>
+                      {g.invoiceNumber && <button className="btn btn-sm" onClick={() => setPrintTarget(g.invoiceNumber)}>🖨 Print</button>}{' '}
+                      {g.rows.length === 1 && (
+                        <>
+                          <Link to={`/invoices/${g.rows[0].id}`}>Account</Link>{' '}
+                          {canManage && g.pending > 0.5 && status !== 'Cancelled' && (
+                            <button className="btn btn-sm" onClick={() => markPaid(g.rows[0].id)}>Settle in full</button>
+                          )}{' '}
+                          {canManage && g.tds > 0.5 && (
+                            <button className="btn btn-sm" onClick={() => openTds(g.rows[0])}>
+                              {g.rows[0].tdsCertificate?.status === 'Received' ? '✓ TDS cert' : 'TDS certificate'}
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                  {isOpen && g.rows.length > 1 && g.rows.map((i) => (
+                    <tr key={i.id} className="small-muted">
+                      <td></td>
+                      <td colSpan={4} style={{ paddingLeft: 24 }}>
+                        {i.candidate?.name || i.candidateName || '—'}
+                        {(i.requirement?.department || i.department) && <span> · {i.requirement?.department || i.department}</span>}
+                      </td>
+                      <td>{money(i.amount)}</td>
+                      <td>{money(i.gst)}</td>
+                      <td>{money(i.amount + i.gst)}</td>
+                      <td>−{money(i.tds)}</td>
+                      <td>{money(i.receivedAmount)}</td>
+                      <td>{money(i.outstanding)}</td>
+                      <td><span className={`status ${statusClass(i.status)}`}>{i.status}</span></td>
+                      <td>{i.dueDate || '—'}</td>
+                      <td>
+                        <Link to={`/invoices/${i.id}`}>Account</Link>{' '}
+                        {canManage && i.outstanding > 0.5 && i.status !== 'Cancelled' && (
+                          <button className="btn btn-sm" onClick={() => markPaid(i.id)}>Settle in full</button>
+                        )}{' '}
+                        {canManage && i.tds > 0.5 && (
+                          <button className="btn btn-sm" onClick={() => openTds(i)}>
+                            {i.tdsCertificate?.status === 'Received' ? '✓ TDS cert' : 'TDS certificate'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
+            {invoiceGroups.length === 0 && <tr><td colSpan={14} className="small-muted">No invoices in this state.</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {printTarget && <InvoicePrintModal invoiceNumber={printTarget} onClose={() => setPrintTarget(null)} />}
 
       {tdsTarget && (
         <div className="card section" style={{ borderColor: 'var(--warn)' }}>

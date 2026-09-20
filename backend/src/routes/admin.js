@@ -111,10 +111,23 @@ router.get('/company', async (req, res) => {
 });
 
 router.put('/company', requireRole(...ADMIN_ROLES), async (req, res) => {
-  const { name, email, phone, address } = req.body;
+  const {
+    name, email, phone, address,
+    legalName, gstin, pan, addressLine1, addressLine2, city, state, pincode, country,
+    bankName, bankAccName, bankAccNo, bankIfsc, bankBranch,
+    logo, stamp, signature, signatoryName, signatoryTitle,
+  } = req.body;
   let company = await prisma.company.findFirst();
   if (!company) company = await prisma.company.create({ data: { name: name || 'TeamLink Consultants' } });
-  const updated = await prisma.company.update({ where: { id: company.id }, data: { name, email, phone, address } });
+  const updated = await prisma.company.update({
+    where: { id: company.id },
+    data: {
+      name, email, phone, address,
+      legalName, gstin, pan, addressLine1, addressLine2, city, state, pincode, country,
+      bankName, bankAccName, bankAccNo, bankIfsc, bankBranch,
+      logo, stamp, signature, signatoryName, signatoryTitle,
+    },
+  });
   await logAudit({ userId: req.user.id, action: 'Company profile updated', entity: 'Company', entityId: updated.id });
   res.json(updated);
 });

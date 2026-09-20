@@ -5,6 +5,7 @@ const { logAudit } = require('../utils/audit');
 const { notifyUsers } = require('../utils/notify');
 const { computeMatch } = require('../utils/matching');
 const { stageLabel, STAGE_OWNER_ACTION } = require('../utils/atsVocab');
+const { nextGroupedInvoiceNumber } = require('../utils/invoiceNumber');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -66,6 +67,8 @@ async function raiseJoiningInvoice({ application, existing, userId }) {
   const tds = Math.round(amount * ((client.tdsPercent != null ? client.tdsPercent : 10) / 100));
 
   const joiningDate = application.joiningDate || new Date().toISOString().slice(0, 10);
+  const invoiceDate = offsetDate(joiningDate, 6);
+  const invoiceNumber = await nextGroupedInvoiceNumber({ clientId: client.id, invoiceDate });
   const invoice = await prisma.invoice.create({
     data: {
       clientId: client.id,
@@ -76,16 +79,17 @@ async function raiseJoiningInvoice({ application, existing, userId }) {
       tds,
       status: 'Pending',
       joiningDate,
-      invoiceDate: offsetDate(joiningDate, 6),
+      invoiceDate,
       dueDate: offsetDate(joiningDate, 12),
       feePercent,
       offeredCtc: ctc,
       paymentTerms: client.paymentTerms || 'Invoice 6 days after joining; payment due within 6 days of invoice',
+      invoiceNumber,
     },
   });
   await logAudit({
     userId, action: 'Invoice generated from ATS (Client Joining)', entity: 'Invoice',
-    entityId: invoice.id, toValue: 'Pending',
+    entityId: invoice.id, toValue: `Pending · ${invoiceNumber}`,
   });
   return invoice;
 }

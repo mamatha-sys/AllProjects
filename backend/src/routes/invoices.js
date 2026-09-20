@@ -5,6 +5,9 @@ const { logAudit } = require('../utils/audit');
 const {
   ROUND, invoiceTotal, invoiceOutstanding, deriveInvoiceStatus, dueDateFor,
 } = require('../utils/accounts');
+const { nextGroupedInvoiceNumber } = require('../utils/invoiceNumber');
+const { splitGst } = require('../utils/gstSplit');
+const { amountInWords } = require('../utils/numberToWords');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -32,18 +35,6 @@ async function syncStatus(invoice) {
     return { ...invoice, status };
   }
   return invoice;
-}
-
-async function nextInvoiceNumber() {
-  const year = new Date().getFullYear();
-  const prefix = `INV-${year}-`;
-  const last = await prisma.invoice.findFirst({
-    where: { invoiceNumber: { startsWith: prefix } },
-    orderBy: { invoiceNumber: 'desc' },
-    select: { invoiceNumber: true },
-  });
-  const seq = last ? Number(String(last.invoiceNumber).slice(prefix.length)) + 1 : 1;
-  return prefix + String(seq).padStart(4, '0');
 }
 
 router.get('/', async (req, res) => {
@@ -86,6 +77,24 @@ router.get('/summary', async (req, res) => {
   });
 });
 
+// ---- Saved views (Work/Invoices filter combinations) ----
+// Registered ahead of GET /:id — a literal path segment like "saved-views"
+// would otherwise be swallowed by the :id wildcard, since Express matches
+// routes in registration order rather than by specificity.
+router.get('/saved-views', async (req, res) => {
+  const views = await prisma.savedInvoiceView.findMany({ orderBy: { createdAt: 'desc' } });
+  res.json(views.map((v) => ({ ...v, filters: JSON.parse(v.filters) })));
+});
+
+router.post('/saved-views', async (req, res) => {
+  const { name, filters } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name it.' });
+  const view = await prisma.savedInvoiceView.create({
+    data: { name: name.trim(), filters: JSON.stringify(filters || {}), createdBy: req.user.name || req.user.email || null },
+  });
+  res.status(201).json({ ...view, filters: JSON.parse(view.filters) });
+});
+
 router.get('/:id', async (req, res) => {
   const invoice = await prisma.invoice.findUnique({
     where: { id: req.params.id },
@@ -106,6 +115,58 @@ router.get('/:id', async (req, res) => {
   res.json({ ...decorate(synced), applicationId: application?.id || null });
 });
 
+// Everything the printable invoice needs: every candidate row sharing this
+// invoice number, the CGST/SGST/IGST split (same-state vs inter-state, from
+// the company's and the client's state), and the amount in words — computed
+// here so the print view never has to duplicate the money logic.
+router.get('/group/:invoiceNumber', async (req, res) => {
+  const rows = await prisma.invoice.findMany({
+    where: { invoiceNumber: req.params.invoiceNumber },
+    include: { client: true, candidate: true, requirement: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  if (!rows.length) return res.status(404).json({ error: 'No invoice with that number' });
+  if (req.user.role === 'CLIENT' && rows[0].clientId !== req.user.clientId) {
+    return res.status(403).json({ error: 'This record is outside your client scope' });
+  }
+  let company = await prisma.company.findFirst();
+  if (!company) company = await prisma.company.create({ data: { name: 'TeamLink Consultants' } });
+
+  const decorated = rows.map(decorate);
+  const client = rows[0].client;
+  const before = ROUND(decorated.reduce((s, i) => s + Number(i.amount || 0), 0));
+  const gst = ROUND(decorated.reduce((s, i) => s + Number(i.gst || 0), 0));
+  const tds = ROUND(decorated.reduce((s, i) => s + Number(i.tds || 0), 0));
+  const after = ROUND(before + gst);
+  const receivable = ROUND(after - tds);
+  const received = ROUND(decorated.reduce((s, i) => s + Number(i.receivedAmount || 0), 0));
+  const split = splitGst(gst, company.state, client?.state);
+
+  res.json({
+    invoiceNumber: req.params.invoiceNumber,
+    invoiceDate: rows[0].invoiceDate,
+    dueDate: rows[0].dueDate,
+    paymentTerms: rows[0].paymentTerms,
+    client,
+    company,
+    rows: decorated.map((i) => ({
+      id: i.id,
+      name: i.candidate?.name || i.candidateName || '—',
+      role: i.requirement?.title || i.candidateRole || '',
+      hsnSac: i.hsnSac || '998512',
+      amount: Number(i.amount || 0),
+      gst: Number(i.gst || 0),
+      tds: Number(i.tds || 0),
+      total: i.total,
+      status: i.status,
+    })),
+    totals: { before, gst, after, tds, receivable, received, pending: ROUND(receivable - received) },
+    gstSplit: split,
+    amountInWords: amountInWords(after),
+    netPayableInWords: amountInWords(receivable),
+  });
+});
+
 router.post('/', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
   const { clientId, candidateId, requirementId, amount, gst, tds, invoiceDate, dueDate, paymentTerms, notes } = req.body;
   if (!clientId || !amount || !invoiceDate) return res.status(400).json({ error: 'clientId, amount and invoiceDate are required' });
@@ -124,7 +185,7 @@ router.post('/', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
       dueDate: dueDate || dueDateFor(invoiceDate, terms),
       paymentTerms: terms,
       notes: notes || null,
-      invoiceNumber: await nextInvoiceNumber(),
+      invoiceNumber: await nextGroupedInvoiceNumber({ clientId, invoiceDate }),
     },
   });
   await logAudit({ userId: req.user.id, action: 'Invoice created', entity: 'Invoice', entityId: invoice.id, toValue: invoice.invoiceNumber });
@@ -241,21 +302,6 @@ router.put('/:id/tds-certificate', requireRole(...ACCOUNTS_ROLES), async (req, r
   });
   await logAudit({ userId: req.user.id, action: `TDS certificate ${cert.status === 'Received' ? 'received' : 'not received'}`, entity: 'Invoice', entityId: invoice.id, toValue: cert.status });
   res.json(cert);
-});
-
-// ---- Saved views (Work/Invoices filter combinations) ----
-router.get('/saved-views', async (req, res) => {
-  const views = await prisma.savedInvoiceView.findMany({ orderBy: { createdAt: 'desc' } });
-  res.json(views.map((v) => ({ ...v, filters: JSON.parse(v.filters) })));
-});
-
-router.post('/saved-views', async (req, res) => {
-  const { name, filters } = req.body;
-  if (!name || !name.trim()) return res.status(400).json({ error: 'Name it.' });
-  const view = await prisma.savedInvoiceView.create({
-    data: { name: name.trim(), filters: JSON.stringify(filters || {}), createdBy: req.user.name || req.user.email || null },
-  });
-  res.status(201).json({ ...view, filters: JSON.parse(view.filters) });
 });
 
 router.delete('/saved-views/:id', async (req, res) => {

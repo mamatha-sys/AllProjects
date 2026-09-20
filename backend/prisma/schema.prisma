@@ -648,12 +648,16 @@ model Invoice {
   createdAt       DateTime  @default(now())
 
   // Accounts depth — human-facing number, money actually received, and the
-  // bank line that finally closed the invoice off.
-  invoiceNumber   String?   @unique
+  // bank line that finally closed the invoice off. Not unique: several
+  // candidates joining the same client in the same month share one invoice
+  // number (grouped on the printable invoice), the way the reference app
+  // groups its join rows into a single invoice per client per month.
+  invoiceNumber   String?
   receivedAmount  Float     @default(0)
   paidDate        String?
   bankTxnId       String?
   notes           String?
+  hsnSac          String?   @default("998512") // SAC for recruitment/manpower supply services
 
   // Real-data import from the reference Accounts app — carries the join
   // record's candidate/department label when no ATS Candidate/Requirement
@@ -667,6 +671,8 @@ model Invoice {
 
   payments        InvoicePayment[]
   tdsCertificate  TdsCertificate?
+
+  @@index([invoiceNumber])
 }
 
 // Form 16A tracking — the reference app's "TDS certificate" column/modal.
@@ -915,6 +921,29 @@ model Company {
   email   String?
   phone   String?
   address String?
+
+  // Invoice letterhead / branding — the printable invoice's header, GST
+  // registration, bank details and the signature block. All additive and
+  // optional so the existing Company Setup form keeps working unchanged.
+  legalName      String?
+  gstin          String?
+  pan            String?
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  state          String?
+  pincode        String?
+  country        String? @default("India")
+  bankName       String?
+  bankAccName    String?
+  bankAccNo      String?
+  bankIfsc       String?
+  bankBranch     String?
+  logo           String? // data: URL, uploaded from Company Setup
+  stamp          String? // data: URL
+  signature      String? // data: URL
+  signatoryName  String?
+  signatoryTitle String?
 }
 
 model Notification {
