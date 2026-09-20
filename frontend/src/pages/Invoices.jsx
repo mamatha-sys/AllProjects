@@ -427,10 +427,8 @@ export default function Invoices() {
               {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-          <label className="field">
-            <span>Search anything</span>
-            <input placeholder="Candidate, client, phone, invoice no, position…" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
-          </label>
+          <input placeholder="Search anything" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+          <button className="btn btn-sm" onClick={() => setFilters({ client: '', department: '', section: '', role: '', employee: '', gstCharged: '', q: '' })}>Reset all</button>
           <div className="statitem" style={{ background: 'var(--navy-deep, #101a3d)', color: '#fff', borderRadius: 8, padding: '8px 14px', minWidth: 120 }}>
             <div className="n" style={{ color: '#fff' }}>{money(filterTotals.gst)}</div>
             <div className="l" style={{ color: '#b7bde0' }}>Total GST</div>
