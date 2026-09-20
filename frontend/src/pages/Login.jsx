@@ -28,11 +28,8 @@ export default function Login() {
     <div className="login-shell">
       <form className="login-card" onSubmit={onSubmit}>
         <div className="logo-lockup">
-          <div className="mark">TL</div>
-          <div>
-            <div style={{ fontWeight: 600 }}>TeamLink Consultants</div>
-            <div className="small-muted">TeamLink.Enterprise</div>
-          </div>
+          <img src="/brand/teamlink-logo.png" alt="TeamLink Consultants" className="login-logo" />
+          <div className="small-muted">TeamLink.Enterprise</div>
         </div>
         <label className="field">
           <span>Email</span>

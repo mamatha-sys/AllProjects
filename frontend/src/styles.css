@@ -54,6 +54,8 @@ body {
 .sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); }
 .brand { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,.08); display: flex; align-items: center; gap: 10px; }
 .brand .mark { width: 34px; height: 34px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), #7b6bf5); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex-shrink: 0; box-shadow: 0 3px 10px rgba(74,92,240,.4); }
+.brand-logo-plate { background: #fff; border-radius: 8px; padding: 5px 9px; display: flex; align-items: center; flex-shrink: 0; }
+.brand-logo-plate img { height: 24px; width: auto; display: block; }
 .brand .b1 { font-size: 10.5px; color: #8b96b8; letter-spacing: .2px; }
 .brand .b2 { font-weight: 700; font-size: 14.5px; color: #fff; letter-spacing: -.1px; }
 .sidebar nav { padding: 14px 12px 24px; display: flex; flex-direction: column; gap: 1px; }
@@ -189,6 +191,7 @@ tbody tr:hover { background: #f8f9fd; }
 .login-card { position: relative; background: #fff; border-radius: 18px; padding: 34px; width: 380px; display: flex; flex-direction: column; gap: 13px; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
 .logo-lockup { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 .mark { width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), #7b6bf5); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; box-shadow: 0 4px 12px rgba(74,92,240,.35); }
+.login-logo { height: 42px; width: auto; }
 
 /* ---------------------------- careers ---------------------------- */
 .careers-shell { min-height: 100vh; background: var(--bg); }

@@ -133,11 +133,10 @@ export default function Shell() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="mark">TL</div>
-          <div>
-            <div className="b1">TeamLink Consultants</div>
-            <div className="b2">TeamLink.Enterprise</div>
+          <div className="brand-logo-plate">
+            <img src="/brand/teamlink-logo.png" alt="TeamLink Consultants" />
           </div>
+          <div className="b2">TeamLink.Enterprise</div>
         </div>
         <nav>
           <NavLink to="/" end className={({ isActive }) => 'nav-item top-item' + (isActive ? ' active' : '')}>
