@@ -656,6 +656,33 @@ model Invoice {
   notes           String?
 
   payments        InvoicePayment[]
+  tdsCertificate  TdsCertificate?
+}
+
+// Form 16A tracking — the reference app's "TDS certificate" column/modal.
+// TDS is the client's money already paid to the Income Tax Department against
+// our PAN; without this certificate on file it can't be claimed at filing time.
+model TdsCertificate {
+  id            String    @id @default(cuid())
+  invoiceId     String    @unique
+  invoice       Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  status        String    @default("Not received") // Not received | Received
+  certNumber    String?
+  certDate      String?
+  quarter       String? // Q1 (Apr–Jun) | Q2 (Jul–Sep) | Q3 (Oct–Dec) | Q4 (Jan–Mar)
+  amount        Float?
+  notes         String?
+  updatedAt     DateTime  @updatedAt
+}
+
+// A saved filter combination on the Invoices (Work) page — one click puts
+// every filter back, matching the reference app's "Saved views".
+model SavedInvoiceView {
+  id        String   @id @default(cuid())
+  name      String
+  filters   String // JSON-encoded filter snapshot
+  createdBy String?
+  createdAt DateTime @default(now())
 }
 
 // A receipt against an invoice. An invoice can be settled by several of these,

@@ -52,7 +52,7 @@ router.get('/', async (req, res) => {
   if (req.query.clientId) where.clientId = req.query.clientId;
   const invoices = await prisma.invoice.findMany({
     where,
-    include: { client: true, candidate: true, requirement: true },
+    include: { client: true, candidate: true, requirement: { include: { recruiter: true, bde: true } }, tdsCertificate: true },
     orderBy: { invoiceDate: 'desc' },
   });
   const synced = await Promise.all(invoices.map(syncStatus));
@@ -227,6 +227,40 @@ router.patch('/:id/cancel', requireRole(...ACCOUNTS_ROLES), async (req, res) => 
   const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { status: 'Cancelled' } });
   await logAudit({ userId: req.user.id, action: 'Invoice cancelled', entity: 'Invoice', entityId: invoice.id, fromValue: invoice.status, toValue: 'Cancelled' });
   res.json(decorate(updated));
+});
+
+// ---- TDS certificate (Form 16A) tracking — additive to the existing Invoices screen ----
+router.put('/:id/tds-certificate', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  const { status, certNumber, certDate, quarter, amount, notes } = req.body;
+  const cert = await prisma.tdsCertificate.upsert({
+    where: { invoiceId: invoice.id },
+    create: { invoiceId: invoice.id, status: status || 'Not received', certNumber, certDate, quarter, amount: amount != null ? Number(amount) : null, notes },
+    update: { status: status || 'Not received', certNumber, certDate, quarter, amount: amount != null ? Number(amount) : null, notes },
+  });
+  await logAudit({ userId: req.user.id, action: `TDS certificate ${cert.status === 'Received' ? 'received' : 'not received'}`, entity: 'Invoice', entityId: invoice.id, toValue: cert.status });
+  res.json(cert);
+});
+
+// ---- Saved views (Work/Invoices filter combinations) ----
+router.get('/saved-views', async (req, res) => {
+  const views = await prisma.savedInvoiceView.findMany({ orderBy: { createdAt: 'desc' } });
+  res.json(views.map((v) => ({ ...v, filters: JSON.parse(v.filters) })));
+});
+
+router.post('/saved-views', async (req, res) => {
+  const { name, filters } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name it.' });
+  const view = await prisma.savedInvoiceView.create({
+    data: { name: name.trim(), filters: JSON.stringify(filters || {}), createdBy: req.user.name || req.user.email || null },
+  });
+  res.status(201).json({ ...view, filters: JSON.parse(view.filters) });
+});
+
+router.delete('/saved-views/:id', async (req, res) => {
+  await prisma.savedInvoiceView.delete({ where: { id: req.params.id } }).catch(() => {});
+  res.json({ ok: true });
 });
 
 module.exports = router;
