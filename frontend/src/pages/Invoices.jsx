@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import PeriodPicker from '../components/PeriodPicker.jsx';
 import InvoicePrintModal from '../components/InvoicePrintModal.jsx';
 import { downloadCsv } from '../utils/csv.js';
+import { resolvePeriod } from '../utils/period.js';
 
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 const STATUSES = ['All', 'Pending', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'];
@@ -50,7 +51,7 @@ export default function Invoices() {
   const [error, setError] = useState('');
 
   // --- Additive Work-page features: period, ageing, grouping, saved views, TDS certs ---
-  const [period, setPeriod] = useState({ mode: 'ALL' });
+  const [period, setPeriod] = useState({ mode: 'FYC' });
   const [age, setAge] = useState('All');
   const [groupBy, setGroupBy] = useState('inv');
   const [savedViews, setSavedViews] = useState([]);
@@ -64,12 +65,27 @@ export default function Invoices() {
   const [payTarget, setPayTarget] = useState(null);
   const [payForm, setPayForm] = useState({ amount: '', date: '', method: 'Bank Transfer', reference: '' });
 
+  // --- The reference Work page's filter bar: client / department / section /
+  // role / employee / GST charged / search, on top of the same real invoices ---
+  const [filters, setFilters] = useState({ client: '', department: '', section: '', role: '', employee: '', gstCharged: '', q: '' });
+  const [opts, setOpts] = useState({ clients: [], departments: [], sections: [], roles: [], employees: [] });
+  const [clientList, setClientList] = useState([]);
+  const [joinTarget, setJoinTarget] = useState(null);
+  const [joinForm, setJoinForm] = useState({ clientId: '', candidateName: '', department: '', section: '', joinDate: '', amount: '', gstPct: '', tdsPct: '' });
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importNote, setImportNote] = useState('');
+
   const load = useCallback(() => {
     api.get('/invoices').then((res) => setInvoices(res.data));
     api.get('/invoices/summary').then((res) => setSummary(res.data)).catch(() => setSummary(null));
     api.get('/invoices/saved-views').then((res) => setSavedViews(res.data)).catch(() => setSavedViews([]));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    api.get('/accounts-dashboard/filters').then((res) => setOpts(res.data)).catch(() => {});
+    api.get('/clients').then((res) => setClientList(res.data)).catch(() => {});
+  }, []);
 
   async function markPaid(id) {
     setError('');
@@ -83,16 +99,53 @@ export default function Invoices() {
 
   const rows = status === 'All' ? invoices : invoices.filter((i) => i.status === status);
 
-  // Additive scoping on top of the existing status-tab rows — defaults (period
-  // ALL, age All) leave `scopedRows` identical to `rows`, so nothing existing
-  // changes unless the new filters are actually used.
+  // Financial-year-aware period resolution (Current FY / Previous FY /
+  // Quarter / Half / Custom / All time) — the same logic the Accounts
+  // Dashboard's backend uses, mirrored client-side here.
+  const periodResolved = resolvePeriod(period);
   const inPeriod = (i) => {
-    if (!period.from && !period.to) return true;
-    if (period.from && i.invoiceDate < period.from) return false;
-    if (period.to && i.invoiceDate > period.to) return false;
+    if (!periodResolved.from && !periodResolved.to) return true;
+    if (periodResolved.from && i.invoiceDate < periodResolved.from) return false;
+    if (periodResolved.to && i.invoiceDate > periodResolved.to) return false;
     return true;
   };
-  const scopedRows = rows.filter((i) => inPeriod(i) && (age === 'All' || ageBucket(i) === age));
+
+  const employeesForRole = filters.role ? opts.employees.filter((e) => e.role === filters.role) : opts.employees;
+
+  // The reference Work page's filter bar — client / department / section /
+  // role / employee / GST charged / search — all narrowing the SAME
+  // underlying invoices, on top of the existing status tab and period.
+  const matchesFilters = (i) => {
+    if (filters.client && i.client?.name !== filters.client) return false;
+    if (filters.department && (i.requirement?.department || i.department) !== filters.department) return false;
+    if (filters.section && (i.requirement?.section || i.section) !== filters.section) return false;
+    if (filters.role === 'RECRUITER' && !i.requirement?.recruiterId) return false;
+    if (filters.role === 'BDE' && !i.requirement?.bdeId) return false;
+    if (filters.employee) {
+      const names = [i.requirement?.recruiter?.name, i.requirement?.bde?.name];
+      if (!names.includes(filters.employee)) return false;
+    }
+    if (filters.gstCharged === 'Yes' && !(Number(i.gst) > 0.5)) return false;
+    if (filters.gstCharged === 'No' && Number(i.gst) > 0.5) return false;
+    if (filters.q) {
+      const needle = filters.q.toLowerCase();
+      const hay = [i.candidate?.name || i.candidateName, i.client?.name, i.candidate?.phone, i.invoiceNumber, i.requirement?.department || i.department]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  };
+
+  // Defaults to the current financial year, matching the reference Work
+  // page — pick "All time" from the period picker to see every invoice.
+  const scopedRows = rows.filter((i) => inPeriod(i) && matchesFilters(i) && (age === 'All' || ageBucket(i) === age));
+
+  const filterTotals = scopedRows.reduce((t, i) => ({
+    before: t.before + Number(i.amount || 0),
+    gst: t.gst + Number(i.gst || 0),
+    tds: t.tds + Number(i.tds || 0),
+  }), { before: 0, gst: 0, tds: 0 });
+  filterTotals.after = filterTotals.before + filterTotals.gst;
 
   const ageCounts = AGE_BUCKETS.map((b) => ({ label: b, count: rows.filter((i) => inPeriod(i) && ageBucket(i) === b).length, amount: rows.filter((i) => inPeriod(i) && ageBucket(i) === b).reduce((s, i) => s + i.outstanding, 0) }));
 
@@ -215,6 +268,56 @@ export default function Invoices() {
     downloadCsv('instalments.csv', ['Invoice No', 'Client', 'Candidate', 'Date', 'Amount', 'Method', 'Reference', 'Recorded By'], lines);
   }
 
+  // "+ New join" and "Import Excel" both go through the same POST /invoices
+  // endpoint the Accounts screen already uses for a manual invoice — no
+  // separate creation path, so there is exactly one way a join becomes a row.
+  function openJoin() {
+    setJoinTarget(true);
+    setJoinForm({ clientId: '', candidateName: '', department: '', section: '', joinDate: new Date().toISOString().slice(0, 10), amount: '', gstPct: '18', tdsPct: '10' });
+  }
+  async function saveJoin() {
+    setError('');
+    try {
+      const amount = Number(joinForm.amount) || 0;
+      const gst = Math.round(amount * (Number(joinForm.gstPct) || 0) / 100);
+      const tds = Math.round(amount * (Number(joinForm.tdsPct) || 0) / 100);
+      await api.post('/invoices', {
+        clientId: joinForm.clientId, amount, gst, tds, invoiceDate: joinForm.joinDate,
+        candidateName: joinForm.candidateName, department: joinForm.department, section: joinForm.section,
+      });
+      setJoinTarget(null);
+      load();
+    } catch (e) {
+      setError(e.response?.data?.error || 'That did not work.');
+    }
+  }
+
+  async function runImport() {
+    setImportNote('');
+    setError('');
+    const lines = importText.trim().split(/\r?\n/).filter(Boolean);
+    if (!lines.length) return;
+    const header = lines[0].toLowerCase();
+    const body = header.includes('client') ? lines.slice(1) : lines;
+    let created = 0; let skipped = 0;
+    for (const line of body) {
+      const [clientName, candidateName, joinDate, amountStr, gstPctStr, tdsPctStr] = line.split(',').map((s) => (s || '').trim());
+      const client = clientList.find((c) => c.name.toLowerCase() === (clientName || '').toLowerCase());
+      const amount = Number(amountStr) || 0;
+      if (!client || !amount || !joinDate) { skipped += 1; continue; }
+      const gst = Math.round(amount * (Number(gstPctStr) || 0) / 100);
+      const tds = Math.round(amount * (Number(tdsPctStr) || 0) / 100);
+      try {
+        await api.post('/invoices', { clientId: client.id, amount, gst, tds, invoiceDate: joinDate, candidateName });
+        created += 1;
+      } catch (e) {
+        skipped += 1;
+      }
+    }
+    setImportNote(`${created} row(s) imported${skipped ? `, ${skipped} skipped (client not found or missing amount/date)` : ''}.`);
+    if (created) load();
+  }
+
   return (
     <div>
       <div className="page-head">
@@ -222,7 +325,142 @@ export default function Invoices() {
           <h1>Invoices</h1>
           <div className="page-sub">An invoice is worth amount + GST − TDS: TDS is deducted at source, so it never reaches the bank.</div>
         </div>
+        <div className="qa-row">
+          <button className="btn btn-sm" onClick={() => setImportOpen((v) => !v)}>⬆ Import Excel</button>
+          {canManage && <button className="btn btn-sm btn-primary" onClick={openJoin}>＋ New join</button>}
+        </div>
       </div>
+
+      {/* --- Reference Work page filter bar: client/period/department/section,
+          role/employee/GST charged/status/search — filters the same real
+          invoices as everything else on this page. --- */}
+      <div className="card section">
+        <div className="filter-row" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'flex-start' }}>
+          <label className="field">
+            <span>Client · {opts.clients.length}</span>
+            <select value={filters.client} onChange={(e) => setFilters({ ...filters, client: e.target.value })}>
+              <option value="">All</option>
+              {opts.clients.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Period</span>
+            <PeriodPicker value={period} onChange={setPeriod} label={periodResolved.label} />
+          </label>
+          <label className="field">
+            <span>Department</span>
+            <select value={filters.department} onChange={(e) => setFilters({ ...filters, department: e.target.value })}>
+              <option value="">All</option>
+              {opts.departments.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Section</span>
+            <select value={filters.section} onChange={(e) => setFilters({ ...filters, section: e.target.value })}>
+              <option value="">All</option>
+              {opts.sections.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+        </div>
+        {periodResolved.from && (
+          <div className="small-muted" style={{ marginTop: -6, marginBottom: 10 }}>{periodResolved.from} – {periodResolved.to}</div>
+        )}
+        <div className="filter-row" style={{ flexWrap: 'wrap', gap: 12, alignItems: 'flex-end' }}>
+          <label className="field">
+            <span>Role · {opts.roles.length}</span>
+            <select value={filters.role} onChange={(e) => setFilters({ ...filters, role: e.target.value, employee: '' })}>
+              <option value="">All</option>
+              <option value="RECRUITER">Recruiter</option>
+              <option value="BDE">BDE</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Employee Name · {opts.employees.length}</span>
+            <select value={filters.employee} onChange={(e) => setFilters({ ...filters, employee: e.target.value })}>
+              <option value="">All</option>
+              {employeesForRole.map((e) => <option key={e.name} value={e.name}>{e.name}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>GST Charged</span>
+            <select value={filters.gstCharged} onChange={(e) => setFilters({ ...filters, gstCharged: e.target.value })}>
+              <option value="">All</option>
+              <option value="Yes">Yes — GST on this invoice</option>
+              <option value="No">No — no GST on this invoice</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Status</span>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Search anything</span>
+            <input placeholder="Candidate, client, phone, invoice no, position…" value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} />
+          </label>
+          <div className="statitem" style={{ background: 'var(--navy-deep, #101a3d)', color: '#fff', borderRadius: 8, padding: '8px 14px', minWidth: 120 }}>
+            <div className="n" style={{ color: '#fff' }}>{money(filterTotals.gst)}</div>
+            <div className="l" style={{ color: '#b7bde0' }}>Total GST</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="statbar">
+        <div className="statitem" style={{ background: 'var(--navy-deep, #101a3d)', color: '#fff', borderRadius: 8, padding: '10px 14px' }}>
+          <div className="n" style={{ color: '#fff' }}>{money(filterTotals.before)}</div>
+          <div className="l" style={{ color: '#b7bde0' }}>Before GST</div>
+        </div>
+        <div className="statitem" style={{ background: 'var(--navy-deep, #101a3d)', color: '#fff', borderRadius: 8, padding: '10px 14px' }}>
+          <div className="n" style={{ color: '#fff' }}>{money(filterTotals.after)}</div>
+          <div className="l" style={{ color: '#b7bde0' }}>After GST</div>
+        </div>
+        <div className="statitem" style={{ background: 'var(--navy-deep, #101a3d)', color: '#fff', borderRadius: 8, padding: '10px 14px' }}>
+          <div className="n" style={{ color: '#fff' }}>{money(filterTotals.tds)}</div>
+          <div className="l" style={{ color: '#b7bde0' }}>TDS</div>
+        </div>
+      </div>
+
+      {importOpen && (
+        <div className="card section" style={{ borderColor: 'var(--accent)' }}>
+          <h3>Import Excel</h3>
+          <div className="small-muted" style={{ marginBottom: 8 }}>
+            Paste rows as CSV — one join per line: <code>Client name, Candidate name, Join date (YYYY-MM-DD), Amount, GST %, TDS %</code>. A header row is optional and skipped automatically. Each row is created the same way as "＋ New join".
+          </div>
+          <textarea rows={5} style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}
+            placeholder={'Client,Candidate,Join Date,Amount,GST%,TDS%\nOrbit Software Solutions,Asha Rao,2026-09-20,150000,18,10'}
+            value={importText} onChange={(e) => setImportText(e.target.value)} />
+          {importNote && <div className="small-muted" style={{ marginTop: 6 }}>{importNote}</div>}
+          <div className="qa-row" style={{ marginTop: 8 }}>
+            <button className="btn btn-sm btn-primary" disabled={!importText.trim()} onClick={runImport}>Import</button>
+            <button className="btn btn-sm" onClick={() => { setImportOpen(false); setImportText(''); setImportNote(''); }}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {joinTarget && (
+        <div className="card section" style={{ borderColor: 'var(--accent)' }}>
+          <h3>New join</h3>
+          <div className="grid-2">
+            <label className="field">
+              <span>Client *</span>
+              <select value={joinForm.clientId} onChange={(e) => setJoinForm({ ...joinForm, clientId: e.target.value })}>
+                <option value="">— select client —</option>
+                {clientList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </label>
+            <label className="field"><span>Candidate name *</span><input value={joinForm.candidateName} onChange={(e) => setJoinForm({ ...joinForm, candidateName: e.target.value })} /></label>
+            <label className="field"><span>Department</span><input value={joinForm.department} onChange={(e) => setJoinForm({ ...joinForm, department: e.target.value })} /></label>
+            <label className="field"><span>Section</span><input value={joinForm.section} onChange={(e) => setJoinForm({ ...joinForm, section: e.target.value })} /></label>
+            <label className="field"><span>Date of joining *</span><input type="date" value={joinForm.joinDate} onChange={(e) => setJoinForm({ ...joinForm, joinDate: e.target.value })} /></label>
+            <label className="field"><span>Billing amount (₹) *</span><input type="number" value={joinForm.amount} onChange={(e) => setJoinForm({ ...joinForm, amount: e.target.value })} /></label>
+            <label className="field"><span>GST %</span><input type="number" value={joinForm.gstPct} onChange={(e) => setJoinForm({ ...joinForm, gstPct: e.target.value })} /></label>
+            <label className="field"><span>TDS %</span><input type="number" value={joinForm.tdsPct} onChange={(e) => setJoinForm({ ...joinForm, tdsPct: e.target.value })} /></label>
+          </div>
+          <button className="btn btn-sm" onClick={() => setJoinTarget(null)}>Cancel</button>{' '}
+          <button className="btn btn-sm btn-primary" disabled={!joinForm.clientId || !joinForm.candidateName || !joinForm.amount || !joinForm.joinDate} onClick={saveJoin}>Add join</button>
+        </div>
+      )}
 
       {summary && (
         <div className="statbar">

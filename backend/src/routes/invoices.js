@@ -171,7 +171,10 @@ router.get('/group/:invoiceNumber', async (req, res) => {
 });
 
 router.post('/', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
-  const { clientId, candidateId, requirementId, amount, gst, tds, invoiceDate, dueDate, paymentTerms, notes } = req.body;
+  const {
+    clientId, candidateId, requirementId, amount, gst, tds, invoiceDate, dueDate, paymentTerms, notes,
+    candidateName, candidateRole, department, section,
+  } = req.body;
   if (!clientId || !amount || !invoiceDate) return res.status(400).json({ error: 'clientId, amount and invoiceDate are required' });
   const terms = paymentTerms || 'Net 30';
   const invoice = await prisma.invoice.create({
@@ -189,6 +192,13 @@ router.post('/', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
       paymentTerms: terms,
       notes: notes || null,
       invoiceNumber: await nextGroupedInvoiceNumber({ clientId, invoiceDate }),
+      // Only used when there's no ATS candidate/requirement behind this join
+      // (a manual "+ New join" entry or an Import Excel row) — lets the
+      // invoice carry a name without creating any ATS-side record.
+      candidateName: candidateId ? null : (candidateName || null),
+      candidateRole: candidateId ? null : (candidateRole || null),
+      department: requirementId ? null : (department || null),
+      section: requirementId ? null : (section || null),
     },
   });
   await logAudit({ userId: req.user.id, action: 'Invoice created', entity: 'Invoice', entityId: invoice.id, toValue: invoice.invoiceNumber });
