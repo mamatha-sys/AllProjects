@@ -126,6 +126,9 @@ body {
 
 /* ---------------------------- tables ---------------------------- */
 .tbl-wrap { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; box-shadow: var(--card-shadow); }
+/* Invoices table only: fits ~5 rows before it scrolls, header stays put. */
+.tbl-wrap-scroll5 { max-height: 300px; overflow-y: auto; }
+.tbl-wrap-scroll5 thead th { position: sticky; top: 0; z-index: 1; }
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid #f1f2f6; }
 th { color: var(--ink-soft); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; background: #fafbfd; }

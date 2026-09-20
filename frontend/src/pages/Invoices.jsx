@@ -310,7 +310,7 @@ export default function Invoices() {
         <button className="btn btn-sm" onClick={exportInstalments}>⬇ Instalments</button>
       </div>
 
-      <div className="tbl-wrap">
+      <div className="tbl-wrap tbl-wrap-scroll5">
         <table>
           <thead>
             <tr>
