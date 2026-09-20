@@ -127,14 +127,14 @@ body {
 /* ---------------------------- tables ---------------------------- */
 .tbl-wrap { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; box-shadow: var(--card-shadow); }
 /* Invoices table only: fits ~5 rows before it scrolls, header stays put. */
-.tbl-wrap-scroll5 { max-height: 300px; overflow-y: auto; scrollbar-width: auto; }
+.tbl-wrap-scroll5 { max-height: 300px; overflow-y: scroll; overflow-x: auto; scrollbar-width: auto; border-radius: 0; }
 .tbl-wrap-scroll5 thead th { position: sticky; top: 0; z-index: 1; }
-/* The default thin/light thumb barely shows against a white table — make
-   this one obvious so it's clear there's more to scroll to. */
-.tbl-wrap-scroll5::-webkit-scrollbar { width: 12px; }
-.tbl-wrap-scroll5::-webkit-scrollbar-track { background: #eef0f6; }
-.tbl-wrap-scroll5::-webkit-scrollbar-thumb { background: #9aa0b8; border-radius: 20px; border: 2px solid #eef0f6; }
-.tbl-wrap-scroll5::-webkit-scrollbar-thumb:hover { background: #7d84a0; }
+/* The default thin/light thumb barely showed against a white table — make
+   this one impossible to miss so it's obvious there's more to scroll to. */
+.tbl-wrap-scroll5::-webkit-scrollbar { width: 16px; }
+.tbl-wrap-scroll5::-webkit-scrollbar-track { background: #dfe2ec; }
+.tbl-wrap-scroll5::-webkit-scrollbar-thumb { background: #5b6178; border-radius: 20px; border: 3px solid #dfe2ec; min-height: 40px; }
+.tbl-wrap-scroll5::-webkit-scrollbar-thumb:hover { background: #3f4457; }
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid #f1f2f6; }
 th { color: var(--ink-soft); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; background: #fafbfd; }
