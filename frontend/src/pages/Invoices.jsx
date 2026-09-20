@@ -4,6 +4,7 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import PeriodPicker from '../components/PeriodPicker.jsx';
 import InvoicePrintModal from '../components/InvoicePrintModal.jsx';
+import InvoiceAccountPanel from '../components/InvoiceAccountPanel.jsx';
 import { downloadCsv } from '../utils/csv.js';
 import { resolvePeriod } from '../utils/period.js';
 import { readFilesAsCsvText } from '../utils/fileImport.js';
@@ -609,11 +610,7 @@ export default function Invoices() {
                       <button className="link-btn" onClick={() => toggleExpand(g.key)} title="Show this invoice's account">{isOpen ? '▾' : '▸'}</button>
                     </td>
                     <td>
-                      {g.invoiceNumber ? (
-                        <button className="link-btn" onClick={() => setPrintTarget(g.invoiceNumber)}>{g.invoiceNumber}</button>
-                      ) : (
-                        <Link to={`/invoices/${g.rows[0].id}`}>{g.rows[0].id.slice(-6)}</Link>
-                      )}
+                      <button className="link-btn" onClick={() => toggleExpand(g.key)}>{g.invoiceNumber || g.rows[0].id.slice(-6)}</button>
                     </td>
                     <td>{g.invoiceDate}</td>
                     <td>{g.client?.name}</td>
@@ -646,17 +643,19 @@ export default function Invoices() {
                         <table style={{ width: '100%' }}>
                           <thead>
                             <tr>
-                              <th style={{ paddingLeft: 24 }}>Candidate</th><th>Before GST</th><th>GST</th><th>After GST</th>
+                              <th style={{ paddingLeft: 24 }}>Candidate</th><th>Department</th><th>Recruiter</th>
+                              <th>Candidates</th><th>Client paying GST</th><th>Before GST</th><th>GST</th><th>After GST</th>
                               <th>TDS</th><th>Received</th><th>Pending</th><th>Status</th><th>Due</th><th>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {g.rows.map((i) => (
                               <tr key={i.id}>
-                                <td style={{ paddingLeft: 24 }}>
-                                  {i.candidate?.name || i.candidateName || '—'}
-                                  {(i.requirement?.department || i.department) && <span> · {i.requirement?.department || i.department}</span>}
-                                </td>
+                                <td style={{ paddingLeft: 24 }}>L ▸ {i.candidate?.name || i.candidateName || '—'}</td>
+                                <td>{i.requirement?.department || i.department || '—'}{(i.requirement?.section || i.section) ? ` · ${i.requirement?.section || i.section}` : ''}</td>
+                                <td>{i.requirement?.recruiter?.name || i.requirement?.bde?.name || '—'}</td>
+                                <td>1</td>
+                                <td><span className={`status ${Number(i.gst) > 0.5 ? 'priority-low' : ''}`}>{Number(i.gst) > 0.5 ? 'Yes' : 'No'}</span></td>
                                 <td>{money(i.amount)}</td>
                                 <td>{money(i.gst)}</td>
                                 <td>{money(i.amount + i.gst)}</td>
@@ -666,7 +665,7 @@ export default function Invoices() {
                                 <td><span className={`status ${statusClass(i.status)}`}>{i.status}</span></td>
                                 <td>{i.dueDate || '—'}</td>
                                 <td>
-                                  <Link to={`/invoices/${i.id}`}>Account</Link>{' '}
+                                  <Link to={`/invoices/${i.id}`}>✎ Edit</Link>{' '}
                                   {canManage && i.outstanding > 0.5 && i.status !== 'Cancelled' && (
                                     <button className="link-btn" onClick={() => openPay(i)}>+ Payment</button>
                                   )}{' '}
@@ -683,6 +682,12 @@ export default function Invoices() {
                             ))}
                           </tbody>
                         </table>
+                        <InvoiceAccountPanel
+                          group={g}
+                          onClose={() => toggleExpand(g.key)}
+                          onPrint={() => setPrintTarget(g.invoiceNumber)}
+                          onPay={() => openPay(g.rows.find((r) => r.outstanding > 0.5) || g.rows[0])}
+                        />
                       </td>
                     </tr>
                   )}
