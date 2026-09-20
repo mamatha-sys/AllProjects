@@ -43,7 +43,10 @@ router.get('/', async (req, res) => {
   if (req.query.clientId) where.clientId = req.query.clientId;
   const invoices = await prisma.invoice.findMany({
     where,
-    include: { client: true, candidate: true, requirement: { include: { recruiter: true, bde: true } }, tdsCertificate: true },
+    include: {
+      client: true, candidate: true, requirement: { include: { recruiter: true, bde: true } }, tdsCertificate: true,
+      payments: { orderBy: { date: 'asc' } },
+    },
     orderBy: { invoiceDate: 'desc' },
   });
   const synced = await Promise.all(invoices.map(syncStatus));

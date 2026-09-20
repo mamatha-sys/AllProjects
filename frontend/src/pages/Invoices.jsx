@@ -4,9 +4,19 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import PeriodPicker from '../components/PeriodPicker.jsx';
 import InvoicePrintModal from '../components/InvoicePrintModal.jsx';
+import { downloadCsv } from '../utils/csv.js';
 
 const ACCOUNTS_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 const STATUSES = ['All', 'Pending', 'Partially Paid', 'Overdue', 'Paid', 'Cancelled'];
+
+// The reference Work page's "Billing type" column — this app doesn't carry a
+// client-level billing-model field, so it's shown from the fee % actually
+// used on the invoice (the nearest equivalent we have).
+function billingTypeOf(g) {
+  const withFee = g.rows.find((r) => r.feePercent != null);
+  if (withFee) return `% of Annual CTC · ${withFee.feePercent}%`;
+  return '—';
+}
 
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 
@@ -49,6 +59,10 @@ export default function Invoices() {
   const [tdsForm, setTdsForm] = useState({ status: 'Not received', certNumber: '', certDate: '', quarter: '', amount: '', notes: '' });
   const [expanded, setExpanded] = useState(() => new Set());
   const [printTarget, setPrintTarget] = useState(null);
+  const [showMoneyCols, setShowMoneyCols] = useState(false);
+  const [showColMenu, setShowColMenu] = useState(false);
+  const [payTarget, setPayTarget] = useState(null);
+  const [payForm, setPayForm] = useState({ amount: '', date: '', method: 'Bank Transfer', reference: '' });
 
   const load = useCallback(() => {
     api.get('/invoices').then((res) => setInvoices(res.data));
@@ -173,6 +187,34 @@ export default function Invoices() {
     load();
   }
 
+  function openPay(i) {
+    setPayTarget(i);
+    setPayForm({ amount: i.outstanding > 0.5 ? String(i.outstanding) : '', date: new Date().toISOString().slice(0, 10), method: 'Bank Transfer', reference: '' });
+  }
+  async function savePay() {
+    setError('');
+    try {
+      await api.post(`/invoices/${payTarget.id}/payments`, { ...payForm, amount: Number(payForm.amount) });
+      setPayTarget(null);
+      load();
+    } catch (e) {
+      setError(e.response?.data?.error || 'That did not work.');
+    }
+  }
+
+  function exportInvoiceAccounts() {
+    downloadCsv('invoice-accounts.csv',
+      ['Invoice No', 'Invoice Date', 'Client', 'Billing Type', 'Candidates', 'Before GST', 'GST', 'After GST', 'TDS', 'Received', 'Pending', 'Status', 'Due Date'],
+      invoiceGroups.map((g) => [g.invoiceNumber || g.rows[0].id.slice(-6), g.invoiceDate, g.client?.name, billingTypeOf(g), g.rows.length, g.before, g.gst, g.before + g.gst, g.tds, g.received, g.pending, groupStatus(g), g.dueDate || '']));
+  }
+  function exportInstalments() {
+    const lines = [];
+    invoiceGroups.forEach((g) => g.rows.forEach((i) => (i.payments || []).forEach((p) => {
+      lines.push([g.invoiceNumber || i.id.slice(-6), i.client?.name, i.candidate?.name || i.candidateName || '—', p.date, p.amount, p.method, p.reference || '', p.recordedBy || '']);
+    })));
+    downloadCsv('instalments.csv', ['Invoice No', 'Client', 'Candidate', 'Date', 'Amount', 'Method', 'Reference', 'Recorded By'], lines);
+  }
+
   return (
     <div>
       <div className="page-head">
@@ -251,13 +293,30 @@ export default function Invoices() {
         </div>
       )}
 
+      {/* --- Table toolbar: matches the reference Work page's local actions --- */}
+      <div className="filter-row" style={{ flexWrap: 'wrap', gap: 8, marginTop: 8, position: 'relative' }}>
+        <div style={{ position: 'relative' }}>
+          <button className="btn btn-sm" onClick={() => setShowColMenu((v) => !v)}>☰ Columns</button>
+          {showColMenu && (
+            <div className="card section" style={{ position: 'absolute', zIndex: 20, top: '100%', left: 0, marginTop: 4, width: 220 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 400 }}>
+                <input type="checkbox" checked={showMoneyCols} onChange={(e) => setShowMoneyCols(e.target.checked)} />
+                Show GST / TDS / Status / Due
+              </label>
+            </div>
+          )}
+        </div>
+        <button className="btn btn-sm" onClick={exportInvoiceAccounts}>⬇ Invoice accounts</button>
+        <button className="btn btn-sm" onClick={exportInstalments}>⬇ Instalments</button>
+      </div>
+
       <div className="tbl-wrap">
         <table>
           <thead>
             <tr>
-              <th></th><th>Invoice</th><th>Invoice Date</th><th>Client</th><th>Candidates</th>
-              <th>Before GST</th><th>GST</th><th>After GST</th><th>TDS</th>
-              <th>Received</th><th>Pending</th><th>Status</th><th>Due</th><th></th>
+              <th></th><th>Invoice No</th><th>Invoice Date</th><th>Client</th><th>Billing Type</th>
+              {showMoneyCols && (<><th>Candidates</th><th>Before GST</th><th>GST</th><th>After GST</th><th>TDS</th><th>Received</th><th>Pending</th><th>Status</th><th>Due</th></>)}
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -268,9 +327,7 @@ export default function Invoices() {
                 <Fragment key={g.key}>
                   <tr>
                     <td>
-                      {g.rows.length > 1 && (
-                        <button className="link-btn" onClick={() => toggleExpand(g.key)} title="Show candidates on this invoice">{isOpen ? '▾' : '▸'}</button>
-                      )}
+                      <button className="link-btn" onClick={() => toggleExpand(g.key)} title="Show this invoice's account">{isOpen ? '▾' : '▸'}</button>
                     </td>
                     <td>
                       {g.invoiceNumber ? (
@@ -281,69 +338,104 @@ export default function Invoices() {
                     </td>
                     <td>{g.invoiceDate}</td>
                     <td>{g.client?.name}</td>
-                    <td>{g.rows.length}</td>
-                    <td>{money(g.before)}</td>
-                    <td>{money(g.gst)}</td>
-                    <td style={{ fontWeight: 600 }}>{money(g.before + g.gst)}</td>
-                    <td>−{money(g.tds)}</td>
-                    <td>{money(g.received)}</td>
-                    <td style={{ fontWeight: 700 }}>{money(g.pending)}</td>
-                    <td><span className={`status ${statusClass(status)}`}>{status}</span></td>
-                    <td>{g.dueDate || '—'}</td>
+                    <td className="small-muted">{billingTypeOf(g)}</td>
+                    {showMoneyCols && (
+                      <>
+                        <td>{g.rows.length}</td>
+                        <td>{money(g.before)}</td>
+                        <td>{money(g.gst)}</td>
+                        <td style={{ fontWeight: 600 }}>{money(g.before + g.gst)}</td>
+                        <td>−{money(g.tds)}</td>
+                        <td>{money(g.received)}</td>
+                        <td style={{ fontWeight: 700 }}>{money(g.pending)}</td>
+                        <td><span className={`status ${statusClass(status)}`}>{status}</span></td>
+                        <td>{g.dueDate || '—'}</td>
+                      </>
+                    )}
                     <td>
-                      {g.invoiceNumber && <button className="btn btn-sm" onClick={() => setPrintTarget(g.invoiceNumber)}>🖨 Print</button>}{' '}
-                      {g.rows.length === 1 && (
-                        <>
-                          <Link to={`/invoices/${g.rows[0].id}`}>Account</Link>{' '}
-                          {canManage && g.pending > 0.5 && status !== 'Cancelled' && (
-                            <button className="btn btn-sm" onClick={() => markPaid(g.rows[0].id)}>Settle in full</button>
-                          )}{' '}
-                          {canManage && g.tds > 0.5 && (
-                            <button className="btn btn-sm" onClick={() => openTds(g.rows[0])}>
-                              {g.rows[0].tdsCertificate?.status === 'Received' ? '✓ TDS cert' : 'TDS certificate'}
-                            </button>
-                          )}
-                        </>
+                      <Link to={`/invoices/${g.rows[0].id}`}>₹ Account</Link>{' '}
+                      {g.invoiceNumber && <button className="link-btn" onClick={() => setPrintTarget(g.invoiceNumber)}>👁 View</button>}{' '}
+                      {canManage && g.pending > 0.5 && status !== 'Cancelled' && (
+                        <button className="link-btn" onClick={() => openPay(g.rows.find((r) => r.outstanding > 0.5) || g.rows[0])}>+ Payment</button>
                       )}
                     </td>
                   </tr>
-                  {isOpen && g.rows.length > 1 && g.rows.map((i) => (
-                    <tr key={i.id} className="small-muted">
+                  {isOpen && (
+                    <tr className="small-muted">
                       <td></td>
-                      <td colSpan={4} style={{ paddingLeft: 24 }}>
-                        {i.candidate?.name || i.candidateName || '—'}
-                        {(i.requirement?.department || i.department) && <span> · {i.requirement?.department || i.department}</span>}
-                      </td>
-                      <td>{money(i.amount)}</td>
-                      <td>{money(i.gst)}</td>
-                      <td>{money(i.amount + i.gst)}</td>
-                      <td>−{money(i.tds)}</td>
-                      <td>{money(i.receivedAmount)}</td>
-                      <td>{money(i.outstanding)}</td>
-                      <td><span className={`status ${statusClass(i.status)}`}>{i.status}</span></td>
-                      <td>{i.dueDate || '—'}</td>
-                      <td>
-                        <Link to={`/invoices/${i.id}`}>Account</Link>{' '}
-                        {canManage && i.outstanding > 0.5 && i.status !== 'Cancelled' && (
-                          <button className="btn btn-sm" onClick={() => markPaid(i.id)}>Settle in full</button>
-                        )}{' '}
-                        {canManage && i.tds > 0.5 && (
-                          <button className="btn btn-sm" onClick={() => openTds(i)}>
-                            {i.tdsCertificate?.status === 'Received' ? '✓ TDS cert' : 'TDS certificate'}
-                          </button>
-                        )}
+                      <td colSpan={showMoneyCols ? 14 : 5} style={{ padding: 0 }}>
+                        <table style={{ width: '100%' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ paddingLeft: 24 }}>Candidate</th><th>Before GST</th><th>GST</th><th>After GST</th>
+                              <th>TDS</th><th>Received</th><th>Pending</th><th>Status</th><th>Due</th><th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.rows.map((i) => (
+                              <tr key={i.id}>
+                                <td style={{ paddingLeft: 24 }}>
+                                  {i.candidate?.name || i.candidateName || '—'}
+                                  {(i.requirement?.department || i.department) && <span> · {i.requirement?.department || i.department}</span>}
+                                </td>
+                                <td>{money(i.amount)}</td>
+                                <td>{money(i.gst)}</td>
+                                <td>{money(i.amount + i.gst)}</td>
+                                <td>−{money(i.tds)}</td>
+                                <td>{money(i.receivedAmount)}</td>
+                                <td>{money(i.outstanding)}</td>
+                                <td><span className={`status ${statusClass(i.status)}`}>{i.status}</span></td>
+                                <td>{i.dueDate || '—'}</td>
+                                <td>
+                                  <Link to={`/invoices/${i.id}`}>Account</Link>{' '}
+                                  {canManage && i.outstanding > 0.5 && i.status !== 'Cancelled' && (
+                                    <button className="link-btn" onClick={() => openPay(i)}>+ Payment</button>
+                                  )}{' '}
+                                  {canManage && i.outstanding > 0.5 && i.status !== 'Cancelled' && (
+                                    <button className="link-btn" onClick={() => markPaid(i.id)}>Settle in full</button>
+                                  )}{' '}
+                                  {canManage && i.tds > 0.5 && (
+                                    <button className="link-btn" onClick={() => openTds(i)}>
+                                      {i.tdsCertificate?.status === 'Received' ? '✓ TDS cert' : 'TDS certificate'}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </td>
                     </tr>
-                  ))}
+                  )}
                 </Fragment>
               );
             })}
-            {invoiceGroups.length === 0 && <tr><td colSpan={14} className="small-muted">No invoices in this state.</td></tr>}
+            {invoiceGroups.length === 0 && <tr><td colSpan={showMoneyCols ? 15 : 6} className="small-muted">No invoices in this state.</td></tr>}
           </tbody>
         </table>
       </div>
 
       {printTarget && <InvoicePrintModal invoiceNumber={printTarget} onClose={() => setPrintTarget(null)} />}
+
+      {payTarget && (
+        <div className="card section" style={{ borderColor: 'var(--accent)' }}>
+          <h3>Record payment</h3>
+          <div className="page-sub">Invoice {payTarget.invoiceNumber || payTarget.id.slice(-6)} · {payTarget.client?.name} · outstanding {money(payTarget.outstanding)}</div>
+          <div className="grid-2">
+            <label className="field"><span>Amount (₹)</span><input type="number" step="0.01" max={payTarget.outstanding} value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} /></label>
+            <label className="field"><span>Date</span><input type="date" value={payForm.date} onChange={(e) => setPayForm({ ...payForm, date: e.target.value })} /></label>
+            <label className="field">
+              <span>Method</span>
+              <select value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })}>
+                <option>Bank Transfer</option><option>Cheque</option><option>UPI</option><option>Cash</option>
+              </select>
+            </label>
+            <label className="field"><span>Reference / UTR</span><input value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })} /></label>
+          </div>
+          <button className="btn btn-sm" onClick={() => setPayTarget(null)}>Cancel</button>{' '}
+          <button className="btn btn-sm btn-primary" onClick={savePay}>Record payment</button>
+        </div>
+      )}
 
       {tdsTarget && (
         <div className="card section" style={{ borderColor: 'var(--warn)' }}>
