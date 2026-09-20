@@ -136,4 +136,107 @@ router.delete('/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- GST position — vendor-wise and month-wise, charged vs paid (additive tab) ----
+router.get('/gst-position', async (req, res) => {
+  const [expenses, invoices] = await Promise.all([
+    prisma.officeExpense.findMany(),
+    prisma.invoice.findMany({ where: { status: { not: 'Cancelled' } } }),
+  ]);
+  const rows = expenses.map(decorate);
+
+  const byVendor = new Map();
+  rows.forEach((r) => {
+    const key = r.vendor || 'Unnamed vendor';
+    const cur = byVendor.get(key) || { vendor: key, entries: 0, billAmount: 0, gst: 0 };
+    cur.entries += 1;
+    cur.billAmount = ROUND(cur.billAmount + r.gross);
+    cur.gst = ROUND(cur.gst + r.gst);
+    byVendor.set(key, cur);
+  });
+  const gstPaidTotal = ROUND(rows.reduce((s, r) => s + r.gst, 0));
+
+  const byMonth = new Map();
+  invoices.forEach((i) => {
+    const m = String(i.invoiceDate || '').slice(0, 7);
+    if (!m) return;
+    const cur = byMonth.get(m) || { month: m, invoices: 0, gstCharged: 0, purchaseEntries: 0, gstPaid: 0 };
+    cur.invoices += 1;
+    cur.gstCharged = ROUND(cur.gstCharged + Number(i.gst || 0));
+    byMonth.set(m, cur);
+  });
+  rows.forEach((r) => {
+    if (!r.month) return;
+    const cur = byMonth.get(r.month) || { month: r.month, invoices: 0, gstCharged: 0, purchaseEntries: 0, gstPaid: 0 };
+    cur.purchaseEntries += 1;
+    cur.gstPaid = ROUND(cur.gstPaid + r.gst);
+    byMonth.set(r.month, cur);
+  });
+
+  res.json({
+    filingPosition: {
+      taxableValue: ROUND(invoices.reduce((s, i) => s + Number(i.amount || 0), 0)),
+      outputTax: ROUND(invoices.reduce((s, i) => s + Number(i.gst || 0), 0)),
+      purchasesWithGst: ROUND(rows.reduce((s, r) => s + r.gross, 0)),
+      inputTaxCredit: gstPaidTotal,
+      vendorBillsOnFile: rows.filter((r) => r.gst > 0.5).length,
+      vendorNamesOnFile: rows.filter((r) => r.gst > 0.5 && r.vendor).length,
+    },
+    byVendor: [...byVendor.values()].sort((a, b) => b.gst - a.gst),
+    byMonth: [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)).map((m) => ({ ...m, net: ROUND(m.gstCharged - m.gstPaid), position: m.gstCharged - m.gstPaid >= 0 ? 'Pay' : 'Credit' })),
+    purchases: rows.filter((r) => r.gst > 0.5).map((r) => ({ date: r.expenseDate, vendor: r.vendor || '—', category: r.category, gross: r.gross, gst: r.gst, status: r.paidStatus })),
+  });
+});
+
+// ---- Profit & Loss — accrual (billed/raised) vs cash (money actually moved) ----
+router.get('/pnl', async (req, res) => {
+  const basis = req.query.basis === 'cash' ? 'cash' : 'accrual';
+  const [expenses, invoices] = await Promise.all([
+    prisma.officeExpense.findMany(),
+    prisma.invoice.findMany({ where: { status: { not: 'Cancelled' } } }),
+  ]);
+  const rows = expenses.map(decorate);
+
+  const byMonth = new Map();
+  const touch = (m) => {
+    if (!byMonth.has(m)) byMonth.set(m, { month: m, joins: 0, income: 0, expenseEntries: 0, spend: 0 });
+    return byMonth.get(m);
+  };
+  invoices.forEach((i) => {
+    const m = basis === 'cash' ? (i.paidDate ? String(i.paidDate).slice(0, 7) : null) : String(i.invoiceDate || '').slice(0, 7);
+    if (!m) return;
+    const cur = touch(m);
+    cur.joins += 1;
+    cur.income = ROUND(cur.income + (basis === 'cash' ? Number(i.receivedAmount || 0) : Number(i.amount || 0)));
+  });
+  rows.forEach((r) => {
+    if (basis === 'cash' && r.paidStatus !== 'Paid') return;
+    if (!r.month) return;
+    const cur = touch(r.month);
+    cur.expenseEntries += 1;
+    cur.spend = ROUND(cur.spend + r.net);
+  });
+
+  const months = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
+  let running = 0;
+  const withResult = months.map((m) => {
+    const pl = ROUND(m.income - m.spend);
+    running = ROUND(running + pl);
+    return { ...m, profitLoss: pl, result: pl >= 0 ? 'Profit' : 'Loss', runningTotal: running };
+  });
+
+  const incomeTotal = ROUND(months.reduce((s, m) => s + m.income, 0));
+  const spendTotal = ROUND(months.reduce((s, m) => s + m.spend, 0));
+
+  res.json({
+    basis,
+    headline: { profitOrLoss: ROUND(incomeTotal - spendTotal), income: incomeTotal, spend: spendTotal, marginPct: incomeTotal > 0 ? ROUND(((incomeTotal - spendTotal) / incomeTotal) * 100) : 0 },
+    months: withResult,
+    notMoneyHeld: {
+      gstCollected: ROUND(invoices.reduce((s, i) => s + Number(i.gst || 0), 0)),
+      gstPaid: ROUND(rows.reduce((s, r) => s + r.gst, 0)),
+      tdsDeductedByClients: ROUND(invoices.reduce((s, i) => s + Number(i.tds || 0), 0)),
+    },
+  });
+});
+
 module.exports = router;

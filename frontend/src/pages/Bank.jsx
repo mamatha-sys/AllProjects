@@ -24,6 +24,7 @@ export default function Bank() {
   const [note, setNote] = useState('');
   const [csv, setCsv] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const [dupes, setDupes] = useState(null);
 
   const load = useCallback(() => {
     Promise.all([
@@ -35,8 +36,19 @@ export default function Bank() {
       setSummary(s.data);
       setInvoices(i.data);
     });
+    api.get('/bank/duplicates').then((res) => setDupes(res.data)).catch(() => setDupes(null));
   }, []);
   useEffect(load, [load]);
+
+  async function dropDupes(ids) {
+    setError('');
+    try {
+      await api.post('/bank/duplicates/drop', { ids });
+      load();
+    } catch (e) {
+      setError(e.response?.data?.error || 'Could not remove those duplicates.');
+    }
+  }
 
   // Every transition goes through here so the failure message from the API is
   // the one the accountant reads, rather than a silent no-op.
@@ -122,6 +134,31 @@ export default function Bank() {
 
       {error && <div className="card section error-text" style={{ marginBottom: 12 }}>{error}</div>}
       {note && <div className="card section small-muted" style={{ marginBottom: 12 }}>{note}</div>}
+
+      {dupes && dupes.groups.length > 0 && (
+        <div className="card section" style={{ borderColor: 'var(--warn)' }}>
+          <h3>The same line imported more than once · {dupes.groups.length}</h3>
+          <div className="page-sub">{dupes.extraCount} extra copy(ies) · {money(dupes.extraAmount)} of double counting</div>
+          {dupes.groups.map((g, gi) => (
+            <div key={gi} className="tbl-wrap" style={{ marginTop: 10 }}>
+              <table>
+                <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Reference</th><th>Keep or remove</th></tr></thead>
+                <tbody>
+                  {g.map((t) => (
+                    <tr key={t.id}>
+                      <td>{t.date}</td><td>{t.description}</td><td>{money(t.amount)}</td><td>{t.reference || '—'}</td>
+                      <td><span className={`status ${t.isKeep ? 'priority-low' : 'priority-high'}`}>{t.isKeep ? 'keep' : 'extra'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button className="btn btn-sm" style={{ marginTop: 6 }} onClick={() => dropDupes(g.filter((t) => !t.isKeep).map((t) => t.id))}>
+                Remove the {g.length - 1} extra cop{g.length - 1 === 1 ? 'y' : 'ies'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="tabbar">
         {STATES.map((s) => (

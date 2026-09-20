@@ -388,4 +388,38 @@ function parseCsv(text) {
   return { rows };
 }
 
+// ---- Duplicate statement lines — the same line imported more than once ----
+// Groups by same date + debit/credit amount + (reference or the first 40
+// chars of the description), matching the reference app's detector.
+router.get('/duplicates', async (req, res) => {
+  const all = await prisma.bankTransaction.findMany({ orderBy: { createdAt: 'asc' } });
+  const groups = new Map();
+  all.forEach((t) => {
+    const key = [t.date, t.type, ROUND(t.amount), (t.reference || t.description || '').trim().toLowerCase().slice(0, 40)].join('|');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+  const dupeGroups = [...groups.values()].filter((g) => g.length > 1);
+  const extraCount = dupeGroups.reduce((s, g) => s + (g.length - 1), 0);
+  const extraAmount = ROUND(dupeGroups.reduce((s, g) => s + g.slice(1).reduce((s2, t) => s2 + t.amount, 0), 0));
+  res.json({
+    groups: dupeGroups.map((g) => g.map((t, i) => ({ ...t, isKeep: i === 0 }))),
+    extraCount,
+    extraAmount,
+  });
+});
+
+router.post('/duplicates/drop', async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids[] is required' });
+  const txns = await prisma.bankTransaction.findMany({ where: { id: { in: ids } } });
+  const stillMatched = txns.filter((t) => t.matched || t.reconStatus === 'Reconciled');
+  if (stillMatched.length) {
+    return res.status(400).json({ error: 'Unmatch the reconciled/matched copies before removing them as duplicates' });
+  }
+  await prisma.bankTransaction.deleteMany({ where: { id: { in: ids } } });
+  await logAudit({ userId: req.user.id, action: 'Duplicate statement line(s) removed', entity: 'BankTransaction', toValue: `${ids.length} removed` });
+  res.json({ ok: true, removed: ids.length });
+});
+
 module.exports = router;
