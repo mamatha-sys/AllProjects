@@ -655,6 +655,16 @@ model Invoice {
   bankTxnId       String?
   notes           String?
 
+  // Real-data import from the reference Accounts app — carries the join
+  // record's candidate/department label when no ATS Candidate/Requirement
+  // exists for it, so the Accounts screens can show it without creating
+  // any ATS-side rows. Falls back only where candidate/requirement is null.
+  candidateName          String?
+  candidateRole          String?
+  candidateQualification String?
+  department             String?
+  section                String?
+
   payments        InvoicePayment[]
   tdsCertificate  TdsCertificate?
 }

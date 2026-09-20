@@ -81,7 +81,7 @@ export default function Invoices() {
 
   function groupKeyOf(i) {
     if (groupBy === 'client') return i.client?.name || '—';
-    if (groupBy === 'dept') return i.requirement?.department || '—';
+    if (groupBy === 'dept') return i.requirement?.department || i.department || '—';
     if (groupBy === 'rec') return i.requirement?.recruiter?.name || i.requirement?.bde?.name || 'not assigned';
     if (groupBy === 'month') return (i.invoiceDate || '').slice(0, 7) || '—';
     return null;
@@ -225,7 +225,7 @@ export default function Invoices() {
               <tr key={i.id}>
                 <td><Link to={`/invoices/${i.id}`}>{i.invoiceNumber || i.id.slice(-6)}</Link></td>
                 <td>{i.client?.name}</td>
-                <td>{i.candidate?.name || '—'}</td>
+                <td>{i.candidate?.name || i.candidateName || '—'}</td>
                 <td>{money(i.amount)}</td>
                 <td>{money(i.gst)}</td>
                 <td>−{money(i.tds)}</td>

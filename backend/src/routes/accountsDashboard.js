@@ -26,8 +26,8 @@ async function scopedInvoices(req) {
       if (!inRange(i.invoiceDate, period.from, period.to)) return false;
     }
     if (req.query.client && i.client?.name !== req.query.client) return false;
-    if (req.query.department && i.requirement?.department !== req.query.department) return false;
-    if (req.query.section && i.requirement?.section !== req.query.section) return false;
+    if (req.query.department && (i.requirement?.department || i.department) !== req.query.department) return false;
+    if (req.query.section && (i.requirement?.section || i.section) !== req.query.section) return false;
     if (req.query.role) {
       const has = req.query.role === 'RECRUITER' ? i.requirement?.recruiterId : req.query.role === 'BDE' ? i.requirement?.bdeId : true;
       if (!has) return false;
@@ -40,7 +40,7 @@ async function scopedInvoices(req) {
     if (req.query.status && status !== req.query.status) return false;
     if (req.query.q) {
       const needle = req.query.q.toLowerCase();
-      const hay = [i.candidate?.name, i.client?.name, i.candidate?.phone, i.invoiceNumber, i.requirement?.recruiter?.name, i.requirement?.bde?.name, i.requirement?.department]
+      const hay = [i.candidate?.name || i.candidateName, i.client?.name, i.candidate?.phone, i.invoiceNumber, i.requirement?.recruiter?.name, i.requirement?.bde?.name, i.requirement?.department || i.department]
         .filter(Boolean).join(' ').toLowerCase();
       if (!hay.includes(needle)) return false;
     }
@@ -67,15 +67,16 @@ function agg(rows) {
 
 // ---- Filter option lists (period-independent, for the filter bar's selects) ----
 router.get('/filters', async (req, res) => {
-  const [clients, requirements, users] = await Promise.all([
+  const [clients, requirements, users, invoiceDeptSections] = await Promise.all([
     prisma.client.findMany({ select: { name: true } }),
     prisma.requirement.findMany({ select: { department: true, section: true } }),
     prisma.user.findMany({ where: { role: { in: ['RECRUITER', 'BDE'] } }, select: { name: true, role: true } }),
+    prisma.invoice.findMany({ select: { department: true, section: true } }),
   ]);
   res.json({
     clients: [...new Set(clients.map((c) => c.name))].sort(),
-    departments: [...new Set(requirements.map((r) => r.department).filter(Boolean))].sort(),
-    sections: [...new Set(requirements.map((r) => r.section).filter(Boolean))].sort(),
+    departments: [...new Set([...requirements.map((r) => r.department), ...invoiceDeptSections.map((i) => i.department)].filter(Boolean))].sort(),
+    sections: [...new Set([...requirements.map((r) => r.section), ...invoiceDeptSections.map((i) => i.section)].filter(Boolean))].sort(),
     roles: ['RECRUITER', 'BDE'],
     employees: users.map((u) => ({ name: u.name, role: u.role })),
   });
@@ -108,7 +109,7 @@ router.get('/', async (req, res) => {
   const byClient = new Map();
   rows.forEach((i) => {
     const key = i.client?.name || '—';
-    const cur = byClient.get(key) || { client: key, department: i.requirement?.department || '—', before: 0, after: 0, receivable: 0, received: 0, pending: 0, lastPayment: null };
+    const cur = byClient.get(key) || { client: key, department: i.requirement?.department || i.department || '—', before: 0, after: 0, receivable: 0, received: 0, pending: 0, lastPayment: null };
     cur.before += Number(i.amount || 0);
     cur.after += Number(i.amount || 0) + Number(i.gst || 0);
     const receivable = Number(i.amount || 0) + Number(i.gst || 0) - Number(i.tds || 0);
@@ -196,7 +197,7 @@ router.get('/recruiter/:name', async (req, res) => {
     clients: [...byClient.values()].map((c) => ({ ...c, fee: ROUND(c.fee), gst: ROUND(c.gst), receivable: ROUND(c.receivable), received: ROUND(c.received), pending: ROUND(c.pending), profit: ROUND(c.profit) })).sort((a, b) => b.joined - a.joined),
     months: [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month)),
     candidates: mine.map((i) => ({
-      id: i.id, candidateName: i.candidate?.name, clientName: i.client?.name,
+      id: i.id, candidateName: i.candidate?.name || i.candidateName, clientName: i.client?.name,
       requirementTitle: i.requirement?.title, joinedDate: i.invoiceDate, invoiceNumber: i.invoiceNumber,
       before: Number(i.amount || 0), receivable: Number(i.amount || 0) + Number(i.gst || 0) - Number(i.tds || 0),
       pending: i.outstanding, status: i.status,
