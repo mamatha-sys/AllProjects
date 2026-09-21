@@ -4,7 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
 const {
   ROUND, invoiceTotal, invoiceOutstanding, deriveInvoiceStatus,
-  suggestInvoiceFor, txnState, toIsoDate,
+  suggestInvoiceFor, txnState, toIsoDate, matchCredit, isOpenInvoice,
 } = require('../utils/accounts');
 
 const router = express.Router();
@@ -34,13 +34,28 @@ async function loadTxn(id) {
   return prisma.bankTransaction.findUnique({ where: { id } });
 }
 
+// The opening balance nobody typed in: work it back from the first line that
+// carries the bank's own printed balance. Without it the running total starts
+// at zero and every line looks out by the same amount, which is exactly the
+// confusion the accounting application's "Fix opening" button clears.
+function impliedOpening(oldestFirst) {
+  const first = oldestFirst.find((t) => t.balance != null);
+  if (!first) return 0;
+  const movement = first.type === 'Credit' ? Number(first.amount || 0) : -Number(first.amount || 0);
+  return ROUND(Number(first.balance) - movement);
+}
+
 // Attach the derived state and, for anything still to be matched, the invoice
 // the matching rules would suggest.
-function decorate(txn, invoiceById, suggestion) {
+function decorate(txn, invoiceById, suggestion, read) {
   const inv = txn.matchedInvoiceId ? invoiceById.get(txn.matchedInvoiceId) : null;
   return {
     ...txn,
     state: txnState(txn),
+    // What the narration reading made of this line: the accounting app's own
+    // confidence vocabulary — client named / amount only — check / several
+    // match / no match — with the client it recognised and why.
+    read: read || null,
     matchedInvoice: inv
       ? { id: inv.id, invoiceNumber: inv.invoiceNumber, client: inv.client?.name, total: invoiceTotal(inv), outstanding: invoiceOutstanding(inv), status: inv.status }
       : null,
@@ -57,18 +72,73 @@ function decorate(txn, invoiceById, suggestion) {
 }
 
 router.get('/', async (req, res) => {
-  const [transactions, invoices] = await Promise.all([
+  const [transactions, invoices, clients] = await Promise.all([
     prisma.bankTransaction.findMany({ orderBy: { date: 'desc' } }),
     prisma.invoice.findMany({ include: { client: true } }),
+    prisma.client.findMany({ select: { id: true, name: true } }),
   ]);
   const invoiceById = new Map(invoices.map((i) => [i.id, i]));
+
+  // Running balance is built oldest-first over every line on file, so it is
+  // the same figure whatever the screen is filtered to.
+  const oldestFirst = [...transactions].sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.createdAt).localeCompare(String(b.createdAt)));
+  const runAt = new Map();
+  let run = impliedOpening(oldestFirst);
+  oldestFirst.forEach((t) => {
+    run = ROUND(run + (t.type === 'Credit' ? Number(t.amount || 0) : -Number(t.amount || 0)));
+    runAt.set(t.id, run);
+  });
+
   const filtered = req.query.state
     ? transactions.filter((t) => txnState(t) === req.query.state)
     : transactions;
   res.json(filtered.map((t) => {
     const needsMatch = txnState(t) === 'Unmatched';
-    return decorate(t, invoiceById, needsMatch ? suggestInvoiceFor(t, invoices) : null);
+    const read = needsMatch ? matchCredit(t, invoices, clients) : null;
+    const row = decorate(t, invoiceById, needsMatch ? suggestInvoiceFor(t, invoices) : null, read);
+    row.runningBalance = runAt.get(t.id);
+    return row;
   }));
+});
+
+// Banking position: the statement against the books, and what the narration
+// reading makes of everything still unmatched.
+router.get('/position', async (req, res) => {
+  const [transactions, invoices, clients] = await Promise.all([
+    prisma.bankTransaction.findMany({ orderBy: { date: 'asc' } }),
+    prisma.invoice.findMany({ include: { client: true } }),
+    prisma.client.findMany({ select: { id: true, name: true } }),
+  ]);
+  const credits = ROUND(transactions.filter((t) => t.type === 'Credit').reduce((s, t) => s + Number(t.amount || 0), 0));
+  const debits = ROUND(transactions.filter((t) => t.type === 'Debit').reduce((s, t) => s + Number(t.amount || 0), 0));
+  const opening = impliedOpening(transactions);
+  const inBooks = ROUND(opening + credits - debits);
+  const withBalance = transactions.filter((t) => t.balance != null);
+  const inBank = withBalance.length ? ROUND(Number(withBalance[withBalance.length - 1].balance)) : null;
+
+  const unmatchedCredits = transactions.filter((t) => t.type === 'Credit' && txnState(t) === 'Unmatched');
+  const reads = unmatchedCredits.map((t) => matchCredit(t, invoices, clients));
+  const kindCount = (kind) => reads.filter((r) => r && r.kind === kind).length;
+
+  res.json({
+    lines: transactions.length,
+    firstLine: transactions[0]?.date || null,
+    lastLine: transactions[transactions.length - 1]?.date || null,
+    credits,
+    debits,
+    opening,
+    inBooks,
+    inBank,
+    difference: inBank == null ? null : ROUND(inBank - inBooks),
+    openInvoices: invoices.filter(isOpenInvoice).length,
+    openInvoiceValue: ROUND(invoices.filter(isOpenInvoice).reduce((s, i) => s + invoiceOutstanding(i), 0)),
+    reading: {
+      'client named': kindCount('client named'),
+      'amount only — check': kindCount('amount only — check'),
+      'several match': kindCount('several match'),
+      'no match': kindCount('no match'),
+    },
+  });
 });
 
 // Reconciliation position: how much of the statement is still to be dealt with.

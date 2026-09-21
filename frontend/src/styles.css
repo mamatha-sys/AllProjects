@@ -319,3 +319,15 @@ footer{border-top:1px solid var(--line);padding:18px 22px;color:var(--ink-soft);
 input:where(:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=file]):not([type=range])){
   width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);
 }
+
+/* --- Accounts: the register's numeric columns, KPI notes and totals row.
+   The accounting screens are money tables, so they need right-aligned figures,
+   a third line under a stat, and a footer row that reads as a total. --- */
+.statitem .s{font-size:10.5px;color:var(--ink-soft);margin-top:2px;line-height:1.35}
+.statitem.acct-good .n{color:var(--teal)}
+.statitem.acct-bad .n{color:var(--red)}
+td.num,th.num{text-align:right;white-space:nowrap}
+tfoot td{font-weight:700;background:var(--line-soft);border-top:1px solid var(--line)}
+tr.acct-kid td{background:var(--paper);font-size:12px}
+tr.acct-kid td:first-child{padding-left:26px}
+.acct-exp{font-size:11px;padding:1px 6px;margin-right:6px;border:1px solid var(--line);border-radius:5px;background:#fff;line-height:1.4}

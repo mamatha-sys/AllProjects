@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { logAudit } = require('../utils/audit');
 const {
   ROUND, invoiceTotal, invoiceOutstanding, deriveInvoiceStatus, dueDateFor,
+  dashRange, inRange, ageBucket, daysOverdue, AGE_BUCKETS,
 } = require('../utils/accounts');
 
 const router = express.Router();
@@ -83,6 +84,121 @@ router.get('/summary', async (req, res) => {
     outstanding: ROUND(rows.filter((i) => i.status !== 'Cancelled').reduce((s, i) => s + i.outstanding, 0)),
     gstCharged: ROUND(rows.reduce((s, i) => s + Number(i.gst || 0), 0)),
     tdsDeducted: ROUND(rows.reduce((s, i) => s + Number(i.tds || 0), 0)),
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The invoice register. One row per invoice with every column the prototype's
+// invoice lens can show, the ageing chip counts, and the KPI strip — computed
+// once on the server so the table, the chips and the totals never disagree.
+// ---------------------------------------------------------------------------
+router.get('/register', async (req, res) => {
+  const where = req.user.role === 'CLIENT' ? { clientId: req.user.clientId } : {};
+  const invoices = await prisma.invoice.findMany({
+    where,
+    include: {
+      client: true,
+      candidate: true,
+      requirement: { include: { recruiter: true, bde: true } },
+      payments: { orderBy: { date: 'asc' } },
+    },
+    orderBy: { invoiceDate: 'desc' },
+  });
+
+  const range = dashRange(req.query.period);
+  const inPeriod = invoices.filter((i) => range.all || inRange(i.invoiceDate, range));
+
+  const row = (i) => {
+    const status = deriveInvoiceStatus(i);
+    const billing = ROUND(Number(i.amount || 0));
+    const gst = ROUND(Number(i.gst || 0));
+    const tds = ROUND(Number(i.tds || 0));
+    const receivable = invoiceTotal(i);
+    const received = ROUND(Number(i.receivedAmount || 0));
+    return {
+      id: i.id,
+      invoiceNumber: i.invoiceNumber || i.id.slice(-6),
+      invoiceDate: i.invoiceDate,
+      client: i.client?.name || '—',
+      clientId: i.clientId,
+      // "Billing type" is how the fee was arrived at, as the client agreement states it.
+      billingType: (i.feePercent ?? i.client?.agreementFeePercent) != null
+        ? `% of Annual CTC · ${i.feePercent ?? i.client.agreementFeePercent}%`
+        : 'Flat fee',
+      clientGstin: i.client?.gst || '',
+      department: i.client?.ownerDepartment || '—',
+      recruiter: i.requirement?.recruiter?.name || null,
+      bde: i.requirement?.bde?.name || null,
+      candidates: i.candidateId ? 1 : 0,
+      candidateName: i.candidate?.name || null,
+      clientPayingGst: gst > 0.5,
+      // Money, in the prototype's own column order: before GST, GST, after GST,
+      // TDS, receivable. Receivable is amount + GST − TDS.
+      billing,
+      gst,
+      invoiceValue: ROUND(billing + gst),
+      tds,
+      receivable,
+      received,
+      pending: ROUND(receivable - received),
+      paymentCount: i.payments.length,
+      paymentMethods: [...new Set(i.payments.map((p) => p.method || '—'))],
+      proof: i.payments.length ? (i.payments.some((p) => !p.reference) ? `${i.payments.filter((p) => !p.reference).length} pending` : 'attached') : null,
+      tdsCert: tds > 0.5 ? (i.tdsCertReceived ? 'in hand' : 'to collect') : null,
+      tdsCertRef: i.tdsCertRef,
+      tdsCertDate: i.tdsCertDate,
+      status,
+      dueDate: i.dueDate,
+      age: ageBucket(i),
+      daysOverdue: daysOverdue(i.dueDate),
+      sentVia: i.sentVia,
+      sentDate: i.sentDate,
+      gstPercent: i.gstPercent ?? i.client?.gstPercent ?? null,
+      tdsPercent: i.tdsPercent ?? i.client?.tdsPercent ?? null,
+      payments: i.payments.map((p) => ({ id: p.id, date: p.date, amount: p.amount, method: p.method, reference: p.reference, recordedBy: p.recordedBy })),
+    };
+  };
+
+  const rows = inPeriod.map(row).filter((r) => r.status !== 'Cancelled' || req.query.includeCancelled === '1');
+  const live = rows.filter((r) => r.status !== 'Cancelled');
+  const sum = (k) => ROUND(live.reduce((s, r) => s + r[k], 0));
+  const overdue = live.filter((r) => r.pending > 0.5 && r.daysOverdue != null && r.daysOverdue > 0);
+
+  const ageing = [...AGE_BUCKETS, 'Settled'].map((bucket) => {
+    const list = rows.filter((r) => r.age === bucket);
+    return { bucket, count: list.length, outstanding: ROUND(list.reduce((s, r) => s + r.pending, 0)) };
+  }).filter((b) => b.bucket !== 'Settled' || b.count > 0);
+
+  const tdsToCollect = live.filter((r) => r.tds > 0.5 && !r.tdsCert?.startsWith('in hand'));
+  const tdsInHand = live.filter((r) => r.tds > 0.5 && r.tdsCert === 'in hand');
+
+  res.json({
+    period: { sel: req.query.period || null, ...range },
+    rows,
+    kpis: {
+      candidates: live.reduce((s, r) => s + r.candidates, 0),
+      clients: new Set(live.map((r) => r.client)).size,
+      invoices: live.length,
+      billing: sum('billing'),
+      gst: sum('gst'),
+      invoiceValue: sum('invoiceValue'),
+      tds: sum('tds'),
+      receivable: sum('receivable'),
+      received: sum('received'),
+      pending: sum('pending'),
+      overdueCount: overdue.length,
+      overdueValue: ROUND(overdue.reduce((s, r) => s + r.pending, 0)),
+    },
+    ageing,
+    tdsCertificates: {
+      toCollect: tdsToCollect.length,
+      toCollectValue: ROUND(tdsToCollect.reduce((s, r) => s + r.tds, 0)),
+      inHand: tdsInHand.length,
+      inHandValue: ROUND(tdsInHand.reduce((s, r) => s + r.tds, 0)),
+    },
+    departments: [...new Set(invoices.map((i) => i.client?.ownerDepartment).filter(Boolean))].sort(),
+    recruiters: [...new Set(invoices.map((i) => i.requirement?.recruiter?.name).filter(Boolean))].sort(),
+    clients: [...new Set(invoices.map((i) => i.client?.name).filter(Boolean))].sort(),
   });
 });
 
@@ -219,6 +335,41 @@ router.patch('/:id/cancel', requireRole(...ACCOUNTS_ROLES), async (req, res) => 
 
   const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { status: 'Cancelled' } });
   await logAudit({ userId: req.user.id, action: 'Invoice cancelled', entity: 'Invoice', entityId: invoice.id, fromValue: invoice.status, toValue: 'Cancelled' });
+  res.json(decorate(updated));
+});
+
+// Form 16A against an invoice the client deducted TDS on. Until it is in hand
+// the register keeps the invoice in its "TDS to collect" total.
+router.patch('/:id/tds-certificate', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (Number(invoice.tds || 0) <= 0.5) return res.status(400).json({ error: 'No TDS was deducted on this invoice' });
+  const received = !!req.body.received;
+  const updated = await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: {
+      tdsCertReceived: received,
+      tdsCertRef: received ? (req.body.reference || null) : null,
+      tdsCertDate: received ? (req.body.date || new Date().toISOString().slice(0, 10)) : null,
+    },
+  });
+  await logAudit({
+    userId: req.user.id, action: received ? 'TDS certificate received' : 'TDS certificate cleared',
+    entity: 'Invoice', entityId: invoice.id, toValue: updated.tdsCertRef || '',
+  });
+  res.json(decorate(updated));
+});
+
+// Record that the invoice went to the client, and how.
+router.patch('/:id/sent', requireRole(...ACCOUNTS_ROLES), async (req, res) => {
+  const invoice = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  const via = ['Email', 'WhatsApp', 'Post', 'By hand'].includes(req.body.via) ? req.body.via : 'Email';
+  const updated = await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: { sentVia: via, sentDate: req.body.date || new Date().toISOString().slice(0, 10) },
+  });
+  await logAudit({ userId: req.user.id, action: 'Invoice sent', entity: 'Invoice', entityId: invoice.id, toValue: via });
   res.json(decorate(updated));
 });
 

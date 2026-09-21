@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import { useAuth } from '../../context/AuthContext.jsx';
+import { downloadCsv } from '../../utils/csv.js';
 
 const money = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const EXPORT_ROLES = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
 
 export default function AccountsReports() {
+  const { user } = useAuth();
+  const canExport = EXPORT_ROLES.includes(user?.role);
   const [data, setData] = useState(null);
+  const [client, setClient] = useState('');
+  const [pick, setPick] = useState('');
 
   useEffect(() => {
     api.get('/reports/accounts').then((res) => setData(res.data));
@@ -12,13 +19,53 @@ export default function AccountsReports() {
 
   if (!data) return <div className="small-muted">Loading…</div>;
 
+  const receivables = client ? data.receivables.filter((r) => r.client === client) : data.receivables;
+
   return (
     <div>
       <div className="page-head">
         <div>
           <h1>Accounts Reports</h1>
-          <div className="page-sub">Totals are amount + GST − TDS, so they match what the client actually pays.</div>
+          <div className="page-sub">Receivables &amp; billing</div>
         </div>
+      </div>
+
+      <div className="filter-row">
+        <select value={pick} onChange={(e) => setPick(e.target.value)}>
+          <option value="">All clients</option>
+          {data.receivables.map((r) => <option key={r.client}>{r.client}</option>)}
+        </select>
+        <button className="btn btn-sm btn-primary" onClick={() => setClient(pick)}>Apply</button>
+        <button className="btn btn-sm btn-ghost" onClick={() => { setPick(''); setClient(''); }}>Clear</button>
+        {canExport
+          ? (
+            <button
+              className="btn btn-sm"
+              onClick={() => downloadCsv('accounts-report.csv', ['Client', 'Invoiced', 'Paid', 'Pending'],
+                receivables.map((r) => [r.client, r.invoiced, r.paid, r.pending]))}
+            >
+              Export CSV
+            </button>
+          )
+          : <span className="small-muted">Export isn&apos;t included in your role&apos;s permissions</span>}
+      </div>
+
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr><th>Client</th><th>Invoiced</th><th>Paid</th><th>Pending</th></tr></thead>
+          <tbody>
+            {receivables.map((r) => (
+              <tr key={r.client}>
+                <td>{r.client}</td><td>{money(r.invoiced)}</td><td>{money(r.paid)}</td><td>{money(r.pending)}</td>
+              </tr>
+            ))}
+            {receivables.length === 0 && <tr><td colSpan="4" className="small-muted" style={{ padding: 16 }}>No data for this filter.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="small-muted" style={{ margin: '16px 0 8px' }}>
+        Invoiced is amount + GST − TDS and Paid is the money actually received, so a part-paid invoice reads correctly.
       </div>
 
       <div className="statbar">

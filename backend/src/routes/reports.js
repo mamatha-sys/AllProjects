@@ -24,10 +24,23 @@ router.get('/ats', async (req, res) => {
   res.json(rows);
 });
 
+// The prototype's Job Portal Reports: four synced-from-the-integration counts
+// above the source table. "Synced" means the record reached us through the
+// connected Job Portal rather than being keyed in here.
 router.get('/job-portal', async (req, res) => {
-  const candidates = await prisma.candidate.findMany();
+  const [candidates, applications] = await Promise.all([
+    prisma.candidate.findMany({ select: { id: true, source: true } }),
+    prisma.application.findMany({ select: { candidateId: true } }),
+  ]);
   const sources = ['Job Portal', 'Naukri', 'Indeed', 'LinkedIn', 'TeamLink Website'];
-  res.json(sources.map((s) => ({ source: s, candidates: candidates.filter((c) => c.source === s).length })));
+  const linked = new Set(candidates.filter((c) => c.source === 'Job Portal').map((c) => c.id));
+  res.json({
+    registrationsSynced: linked.size,
+    applicationsSynced: applications.filter((a) => linked.has(a.candidateId)).length,
+    fromNaukri: candidates.filter((c) => c.source === 'Naukri').length,
+    fromLinkedIn: candidates.filter((c) => c.source === 'LinkedIn').length,
+    rows: sources.map((s) => ({ source: s, candidates: candidates.filter((c) => c.source === s).length })),
+  });
 });
 
 router.get('/accounts', async (req, res) => {
@@ -82,7 +95,23 @@ router.get('/accounts', async (req, res) => {
   const incomeNet = ROUND(rows.filter((i) => i.derived !== 'Cancelled').reduce((s, i) => s + Number(i.amount || 0), 0));
   const spendNet = ROUND(expenses.reduce((s, e) => s + (Number(e.monthlyAmount || 0) - Number(e.gstAmount || 0)), 0));
 
+  // The prototype's own Accounts Reports table: one row per client that has
+  // been invoiced, with Invoiced / Paid / Pending. The prototype totals the
+  // bare `amount` and counts a whole invoice as paid the moment its status
+  // says Paid; here Invoiced is amount + GST − TDS and Paid is the money
+  // actually received, so a part-paid invoice reads correctly.
+  const receivableMap = new Map();
+  rows.filter((i) => i.derived !== 'Cancelled').forEach((i) => {
+    const k = i.client?.name || '—';
+    const cur = receivableMap.get(k) || { client: k, invoiced: 0, paid: 0, pending: 0 };
+    cur.invoiced = ROUND(cur.invoiced + i.total);
+    cur.paid = ROUND(cur.paid + Number(i.receivedAmount || 0));
+    cur.pending = ROUND(cur.invoiced - cur.paid);
+    receivableMap.set(k, cur);
+  });
+
   res.json({
+    receivables: [...receivableMap.values()].sort((a, b) => b.pending - a.pending),
     byStatus,
     ageing: buckets,
     byClient: [...byClientMap.values()].sort((a, b) => b.outstanding - a.outstanding),
