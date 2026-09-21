@@ -53,14 +53,27 @@ router.post('/jobs/:id/apply', async (req, res) => {
   let candidate = await prisma.candidate.findFirst({ where: { email } });
   if (!candidate) {
     candidate = await prisma.candidate.create({ data: { name, email, phone, source: 'Job Portal' } });
+    await prisma.syncLog.create({
+      data: { entity: 'Candidates', status: 'Success', reason: `${candidate.name} registered from the Job Portal`, recordRef: candidate.id },
+    });
   }
 
   const existing = await prisma.application.findUnique({
     where: { candidateId_requirementId: { candidateId: candidate.id, requirementId: job.id } },
   });
-  if (existing) return res.status(409).json({ error: 'You have already applied to this job' });
+  if (existing) {
+    // Administration -> Integrations -> Job Portal Synchronisation shows every
+    // record that came across, failures included.
+    await prisma.syncLog.create({
+      data: { entity: 'Applications', status: 'Failed', reason: 'Duplicate application — this candidate already applied to this job', recordRef: existing.id },
+    });
+    return res.status(409).json({ error: 'You have already applied to this job' });
+  }
 
   const application = await prisma.application.create({ data: { candidateId: candidate.id, requirementId: job.id, stage: 'NEW' } });
+  await prisma.syncLog.create({
+    data: { entity: 'Applications', status: 'Success', reason: `${candidate.name} → ${job.title}`, recordRef: application.id },
+  });
   await logAudit({ action: 'Job Portal application received', entity: 'Application', entityId: application.id, toValue: candidate.name });
 
   res.status(201).json({ message: 'Application submitted', applicationId: application.id });

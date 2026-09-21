@@ -1,45 +1,60 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
 
-// Everyone's in-app inbox, not just an admin view — ATS pipeline changes and
-// the client agreement flow push here (see backend/src/utils/notify.js).
+// Notifications — the prototype's notificationsView() (line 10575): a central
+// event log across Email / WhatsApp / SMS / In-App, five columns wide.
+//
+// Main-only behaviour kept: these are real per-user notifications pushed from
+// the ATS pipeline and the client agreement flow (backend/src/utils/notify.js),
+// so opening the screen marks them read — which is what the prototype does too
+// — and the unread count in the header clears with it.
+
 export default function Notifications() {
   const [notifications, setNotifications] = useState([]);
+  const [loaded, setLoaded] = useState(false);
 
-  function load() {
-    api.get('/admin/notifications').then((res) => setNotifications(res.data));
-  }
-  useEffect(load, []);
-
-  async function markRead(id) {
-    await api.patch(`/admin/notifications/${id}/read`);
-    load();
-  }
-
-  async function markAllRead() {
-    await api.post('/admin/notifications/read-all');
-    load();
-  }
-
-  const unread = notifications.filter((n) => !n.read).length;
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/admin/notifications').then(async (res) => {
+      if (cancelled) return;
+      setNotifications(res.data);
+      setLoaded(true);
+      // Opening the central log marks everything read, as the prototype does.
+      if (res.data.some((n) => !n.read)) await api.post('/admin/notifications/read-all').catch(() => {});
+    }).catch(() => setLoaded(true));
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div>
       <div className="page-head">
-        <h1>Notifications{unread > 0 ? ` (${unread} unread)` : ''}</h1>
-        {unread > 0 && <button className="btn btn-sm" onClick={markAllRead}>Mark all read</button>}
+        <div><h1>Notifications</h1>
+          <div className="page-sub">Central event log across Email / WhatsApp / SMS / In-App</div></div>
       </div>
-      {notifications.map((n) => (
-        <div className="card" key={n.id} style={{ opacity: n.read ? 0.6 : 1 }}>
-          <div className="kv">
-            <span className="k">{n.title}</span>
-            {!n.read && <button className="btn btn-sm" onClick={() => markRead(n.id)}>Mark read</button>}
-          </div>
-          {n.message && <div className="small-muted">{n.message}</div>}
-          <div className="small-muted">{new Date(n.createdAt).toLocaleString()}</div>
-        </div>
-      ))}
-      {notifications.length === 0 && <div className="small-muted">No notifications.</div>}
+
+      <div className="notice amber">
+        Demo / Simulated — no real messages are sent through Email, WhatsApp or SMS providers in this build.
+      </div>
+
+      <div className="tbl-wrap">
+        <table>
+          <thead><tr><th>Recipient</th><th>Channel</th><th>Event</th><th>Status</th><th>Date</th></tr></thead>
+          <tbody>
+            {notifications.map((n) => (
+              <tr key={n.id}>
+                <td>{n.recipient || '—'}</td>
+                <td>{n.channel || 'In-App'}</td>
+                <td>{n.title}{n.message ? <div className="small-muted" style={{ fontSize: 11.5 }}>{n.message}</div> : null}</td>
+                <td><span className="status pending">{n.status || 'Delivered'}</span></td>
+                <td>{new Date(n.createdAt).toLocaleString()}</td>
+              </tr>
+            ))}
+            {loaded && notifications.length === 0 && (
+              <tr><td colSpan="5" className="small-muted" style={{ padding: 16 }}>No notifications yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

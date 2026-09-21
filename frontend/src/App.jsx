@@ -24,7 +24,7 @@ import HrmsDashboard from './pages/hrms/HrmsDashboard.jsx';
 import PerformanceDevelopment from './pages/hrms/PerformanceDevelopment.jsx';
 import EmployeeServices from './pages/hrms/EmployeeServices.jsx';
 import MyProfile from './pages/hrms/MyProfile.jsx';
-import OrgStructure from './pages/hrms/OrgStructure.jsx';
+import OrgStructure from './pages/admin/OrgStructure.jsx';
 
 import Invoices from './pages/Invoices.jsx';
 import InvoiceDetail from './pages/InvoiceDetail.jsx';
