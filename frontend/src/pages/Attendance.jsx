@@ -3,9 +3,9 @@ import api from '../api';
 import { useAuth } from '../context/AuthContext.jsx';
 import TabsPage from '../components/TabsPage.jsx';
 import { downloadCsv, to12h } from '../utils/csv.js';
+import { Panel, PanelPad, PanelHead, StatRow, AssignRow, EmptyMini, TwoCol, QaRow, Status } from '../components/proto.jsx';
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
-const STATUSES = ['Present', 'Absent', 'Late', 'Half Day', 'Leave'];
 const METHODS = ['Web Check-in', 'Mobile App', 'Biometric (Fingerprint)'];
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -28,15 +28,27 @@ function useDepartments(enabled) {
   return departments;
 }
 
+// The prototype's role select lists every designation actually on file.
+function useRoles(enabled) {
+  const [roles, setRoles] = useState([]);
+  useEffect(() => {
+    if (!enabled) return;
+    api.get('/employees')
+      .then((res) => setRoles([...new Set(res.data.map((e) => e.designation).filter(Boolean))].sort()))
+      .catch(() => setRoles([]));
+  }, [enabled]);
+  return roles;
+}
+
 function StatusPill({ status }) {
-  if (!status) return <span className="status">Not marked</span>;
-  const cls = ['Present', 'WFH'].includes(status) ? 'priority-low' : status === 'Absent' ? 'priority-high' : 'priority-medium';
+  if (!status) return <span className="status pending">Not marked</span>;
+  const cls = ['Present', 'WFH'].includes(status) ? 'active' : status === 'Absent' ? 'rejected' : 'pending';
   return <span className={`status ${cls}`}>{status}</span>;
 }
 
 // ---- Tab 1: Dashboard -------------------------------------------------------
 
-function DashboardTab({ isHR }) {
+function DashboardTab({ isHR, goTab }) {
   const [date, setDate] = useState(today());
   const [data, setData] = useState(null);
   const [showMarking, setShowMarking] = useState(true);
@@ -57,67 +69,84 @@ function DashboardTab({ isHR }) {
 
   return (
     <div>
-      <div className="statbar">
-        <Stat n={k.presentToday} l="Present Today" />
-        <Stat n={k.absentToday} l="Absent Today" />
-        <Stat n={k.lateCheckIn} l="Late Check-in" />
-        <Stat n={k.halfDayCut} l="Half-day Cut (month)" />
-        <Stat n={k.missingPunchIn} l="Missing Punch-in" />
-      </div>
+      <StatRow cells={[
+        { value: k.presentToday, label: 'Present Today' },
+        { value: k.absentToday, label: 'Absent Today' },
+        { value: k.lateCheckIn, label: 'Late Check-in' },
+        { value: k.halfDayCut, label: 'Half-day Cut' },
+        { value: k.missingPunchIn, label: 'Missing Punch-in' },
+      ]} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Biometric Reports — Check-in / Check-out</h3>
-          <div className="kv"><span className="k">Total Checked In</span><span><b>{k.totalCheckedIn}</b></span></div>
-          <div className="kv"><span className="k">Total Checked Out</span><span><b>{k.totalCheckedOut}</b></span></div>
+      <TwoCol>
+        <PanelPad>
+          <h3 style={{ fontSize: 14, marginBottom: 10 }}>① Biometric Reports — Check-in / Check-out</h3>
+          <StatRow columns={2} cells={[
+            { value: k.totalCheckedIn, label: 'Total Checked In' },
+            { value: k.totalCheckedOut, label: 'Total Checked Out' },
+          ]} />
           {data.byMethod.map((m) => (
-            <div className="kv" key={m.method}><span className="k">{m.method}</span><span className="small-muted">In: {m.in} · Out: {m.out}</span></div>
+            <AssignRow flush key={m.method}>
+              <span>{m.method}</span>
+              <span className="cell-muted" style={{ fontSize: 12 }}>In: {m.in} · Out: {m.out}</span>
+            </AssignRow>
           ))}
+        </PanelPad>
+        <div>
+          <PanelPad>
+            <h3 style={{ fontSize: 14, marginBottom: 10 }}>② Regularization Requests</h3>
+            {data.regularizations.length === 0
+              ? <EmptyMini>No regularization requests.</EmptyMini>
+              : data.regularizations.map((r) => (
+                <AssignRow flush key={r.id}>
+                  <span>
+                    <b>{r.employee?.name}</b><br />
+                    <span className="cell-muted" style={{ fontSize: 11.5 }}>{r.date}: {r.reason || '—'}</span>
+                  </span>
+                  <span><Status>{r.status}</Status></span>
+                </AssignRow>
+              ))}
+          </PanelPad>
+          <PanelPad>
+            <h3 style={{ fontSize: 14, marginBottom: 10 }}>③ Quick Actions</h3>
+            <QaRow>
+              <button className="btn btn-sm" onClick={() => setShowMarking((s) => !s)}>{showMarking ? '− Hide daily marking' : '+ Show daily marking'}</button>
+              <button className="btn btn-sm" onClick={() => goTab('regularization')}>+ Request Regularization</button>
+              <button className="btn btn-sm" onClick={() => goTab('methods')}>+ Configure Policies</button>
+            </QaRow>
+          </PanelPad>
         </div>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Regularization Requests</h3>
-          {data.regularizations.map((r) => (
-            <div className="kv" key={r.id}>
-              <span className="k"><b>{r.employee?.name}</b> <span className="small-muted">{r.date}: {r.reason || '—'}</span></span>
-              <span className={`status ${r.status === 'Approved' ? 'priority-low' : r.status === 'Rejected' ? 'priority-high' : ''}`}>{r.status}</span>
-            </div>
-          ))}
-          {data.regularizations.length === 0 && <div className="small-muted">No regularization requests.</div>}
-        </div>
-      </div>
+      </TwoCol>
 
-      <div className="card section" style={{ marginTop: 16 }}>
-        <div className="filter-row">
-          <h3 style={{ flex: 1 }}>Daily marking — {date}</h3>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          <button className="btn btn-sm" onClick={() => setShowMarking((s) => !s)}>{showMarking ? '− Hide' : '+ Show'} daily marking</button>
-        </div>
-        {showMarking && (
+      {showMarking && (
+        <Panel style={{ marginTop: 16 }}>
+          <PanelHead title={`Daily marking — ${date}`}>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </PanelHead>
           <div className="tbl-wrap">
             <table>
-              <thead><tr><th>Code</th><th>Name</th><th>Department</th><th>Status</th><th>In</th><th>Location</th><th>Mark</th></tr></thead>
+              <thead><tr><th>Code</th><th>Name</th><th>Department</th><th>Status</th><th>In</th><th>Location</th><th style={{ textAlign: 'right' }}>Mark</th></tr></thead>
               <tbody>
                 {data.marking.map((r) => (
                   <tr key={r.employeeId}>
-                    <td>{r.employeeCode}</td>
+                    <td><b>{r.employeeCode}</b></td>
                     <td>{r.name}</td>
-                    <td>{r.department || '—'}</td>
+                    <td className="cell-muted">{r.department || '—'}</td>
                     <td><StatusPill status={r.status} /></td>
-                    <td>{r.checkIn ? to12h(r.checkIn) : '—'}</td>
-                    <td>{r.location || '—'}</td>
-                    <td>
+                    <td className="cell-muted">{r.checkIn ? to12h(r.checkIn) : '—'}</td>
+                    <td className="cell-muted">{r.location || '—'}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       {['Present', 'Absent', 'Half Day'].map((s) => (
-                        <button key={s} className="btn btn-sm" style={{ marginRight: 4 }} onClick={() => mark(r.employeeId, s)}>{s}</button>
+                        <button key={s} className="btn btn-sm" style={{ marginLeft: 4 }} onClick={() => mark(r.employeeId, s)}>{s}</button>
                       ))}
                     </td>
                   </tr>
                 ))}
-                {data.marking.length === 0 && <tr><td colSpan="7" className="small-muted">No employees.</td></tr>}
+                {data.marking.length === 0 && <tr><td colSpan="7" className="small-muted" style={{ padding: 16 }}>No employees.</td></tr>}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </Panel>
+      )}
     </div>
   );
 }
@@ -146,8 +175,8 @@ function SelfServiceTab() {
 
   return (
     <div>
-      <div className="card section">
-        <h3>Check in / Check out</h3>
+      <PanelPad>
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Check in / Check out</h3>
         <div className="filter-row">
           <select value={method} onChange={(e) => setMethod(e.target.value)}>
             {METHODS.map((m) => <option key={m}>{m}</option>)}
@@ -159,34 +188,40 @@ function SelfServiceTab() {
         <div className="small-muted" style={{ marginTop: 8 }}>
           {todayPunches.length ? `${todayPunches.length} punch(es) recorded today.` : 'No punches recorded today yet.'}
         </div>
-      </div>
+      </PanelPad>
 
-      <div className="tbl-wrap">
-        <table>
-          <thead><tr><th>Date</th><th>Status</th><th>Check-in</th><th>Check-out</th></tr></thead>
-          <tbody>
-            {records.map((r) => (
-              <tr key={r.id}>
-                <td>{r.date}</td>
-                <td><StatusPill status={r.status} /></td>
-                <td>{r.checkIn ? to12h(r.checkIn) : '—'}</td>
-                <td>{r.checkOut ? to12h(r.checkOut) : '—'}</td>
-              </tr>
-            ))}
-            {records.length === 0 && <tr><td colSpan="4" className="small-muted">No attendance records yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <Panel>
+        <PanelHead title="My attendance" />
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Status</th><th>Check-in</th><th>Check-out</th></tr></thead>
+            <tbody>
+              {records.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.date}</td>
+                  <td><StatusPill status={r.status} /></td>
+                  <td className="cell-muted">{r.checkIn ? to12h(r.checkIn) : '—'}</td>
+                  <td className="cell-muted">{r.checkOut ? to12h(r.checkOut) : '—'}</td>
+                </tr>
+              ))}
+              {records.length === 0 && <tr><td colSpan="4" className="small-muted" style={{ padding: 16 }}>No attendance records yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </div>
   );
 }
 
 // ---- Tab 2: Biometric Attendance List ---------------------------------------
 
+const EMPTY_BIO = { date: '', code: '', name: '', department: '', role: '' };
+
 function BiometricTab() {
-  const [filters, setFilters] = useState({ date: '', code: '', name: '', department: '', role: '' });
+  const [filters, setFilters] = useState(EMPTY_BIO);
   const [data, setData] = useState(null);
   const departments = useDepartments(true);
+  const roles = useRoles(true);
 
   useEffect(() => {
     api.get(`/attendance/biometric?${filterQuery(filters)}`).then((res) => setData(res.data));
@@ -203,19 +238,27 @@ function BiometricTab() {
   const set = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
 
   return (
-    <div>
-      <div className="filter-row">
-        <input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} />
-        <input placeholder="Employee ID…" value={filters.code} onChange={(e) => set('code', e.target.value)} />
-        <input placeholder="Employee name…" value={filters.name} onChange={(e) => set('name', e.target.value)} />
-        <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
-          <option value="">All Departments</option>
-          {departments.map((d) => <option key={d}>{d}</option>)}
-        </select>
-        <button className="btn btn-sm" onClick={() => setFilters({ date: '', code: '', name: '', department: '', role: '' })}>Clear</button>
-        {data && <button className="btn btn-sm btn-primary" onClick={exportCsv}>Export</button>}
+    <Panel>
+      <PanelHead title={<>Biometric &amp; Device Attendance — Employee List <span className="cell-muted" style={{ fontSize: 12, fontStyle: 'italic' }}>({data?.month || ''})</span></>}>
+        <button className="btn btn-sm btn-primary" onClick={exportCsv} disabled={!data}>Export</button>
+      </PanelHead>
+      <div style={{ padding: '12px 18px' }}>
+        <div className="filter-row">
+          <input type="date" value={filters.date} onChange={(e) => set('date', e.target.value)} />
+          <input placeholder="Employee ID" value={filters.code} onChange={(e) => set('code', e.target.value)} />
+          <input placeholder="Employee name" value={filters.name} onChange={(e) => set('name', e.target.value)} />
+          <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
+            <option value="">All Departments</option>
+            {departments.map((d) => <option key={d}>{d}</option>)}
+          </select>
+          <select value={filters.role} onChange={(e) => set('role', e.target.value)}>
+            <option value="">All Roles</option>
+            {roles.map((r) => <option key={r}>{r}</option>)}
+          </select>
+          <button className="btn btn-sm" onClick={() => setFilters(EMPTY_BIO)}>Clear</button>
+        </div>
       </div>
-      <div className="small-muted" style={{ marginBottom: 8 }}>
+      <div className="small-muted" style={{ fontSize: 12.5, padding: '0 18px 10px' }}>
         {filters.date
           ? `Showing the biometric report for ${filters.date}. Clear the date to go back to each employee's last-ever punch.`
           : "Showing each employee's last-ever punch. Pick a date above to see that specific day's biometric report instead."}
@@ -233,25 +276,30 @@ function BiometricTab() {
           <tbody>
             {(data?.rows || []).map((r) => (
               <tr key={r.employeeId}>
-                <td>{r.employeeCode}</td><td>{r.name}</td><td>{r.department || '—'}</td><td>{r.role || '—'}</td>
-                <td>{r.method}</td><td>{r.lastPunch}</td>
-                <td>{to12h(r.checkIn)}</td><td>{to12h(r.checkOut)}</td><td>{r.location}</td>
-                <td>{r.present}</td><td>{r.late}</td><td>{r.halfDayCut}</td>
+                <td><b>{r.employeeCode}</b></td><td>{r.name}</td>
+                <td className="cell-muted">{r.department || '—'}</td><td className="cell-muted">{r.role || '—'}</td>
+                <td className="cell-muted">{r.method}</td><td className="cell-muted">{r.lastPunch}</td>
+                <td className="cell-muted">{to12h(r.checkIn)}</td><td className="cell-muted">{to12h(r.checkOut)}</td>
+                <td className="cell-muted">{r.location}</td>
+                <td style={{ textAlign: 'center' }}>{r.present}</td>
+                <td style={{ textAlign: 'center' }}>{r.late}</td>
+                <td style={{ textAlign: 'center' }}>{r.halfDayCut}</td>
               </tr>
             ))}
-            {data && data.rows.length === 0 && <tr><td colSpan="12" className="small-muted">No employees match these filters.</td></tr>}
+            {data && data.rows.length === 0 && <tr><td colSpan="12" className="small-muted" style={{ padding: 16 }}>No employees match these filters</td></tr>}
           </tbody>
         </table>
       </div>
-      {data && <div className="small-muted" style={{ marginTop: 6 }}>{data.rows.length} employee(s)</div>}
-    </div>
+      <div style={{ padding: '10px 18px' }} className="small-muted">{data?.rows.length ?? 0} employee(s)</div>
+    </Panel>
   );
 }
 
 // ---- Tab 3: Punch Log (Detailed) --------------------------------------------
 
 function PunchLogTab() {
-  const [filters, setFilters] = useState({ from: `${thisMonth()}-01`, to: today(), name: '', department: '' });
+  const emptyFilters = { from: `${thisMonth()}-01`, to: today(), name: '', department: '' };
+  const [filters, setFilters] = useState(emptyFilters);
   const [data, setData] = useState(null);
   const departments = useDepartments(true);
 
@@ -270,37 +318,46 @@ function PunchLogTab() {
   }
 
   return (
-    <div>
-      <div className="filter-row">
-        <input type="date" value={filters.from} onChange={(e) => set('from', e.target.value)} />
-        <input type="date" value={filters.to} onChange={(e) => set('to', e.target.value)} />
-        <input placeholder="Employee name…" value={filters.name} onChange={(e) => set('name', e.target.value)} />
-        <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
-          <option value="">All Departments</option>
-          {departments.map((d) => <option key={d}>{d}</option>)}
-        </select>
-        <button className="btn btn-sm" onClick={() => setFilters({ from: `${thisMonth()}-01`, to: today(), name: '', department: '' })}>Clear</button>
-        {data && <button className="btn btn-sm btn-primary" onClick={exportCsv}>Export</button>}
+    <Panel>
+      <PanelHead title="Punch Log — every device punch, paired into sessions">
+        <button className="btn btn-sm btn-primary" onClick={exportCsv} disabled={!data}>Export</button>
+      </PanelHead>
+      <div style={{ padding: '12px 18px' }}>
+        <div className="filter-row">
+          <label className="small-muted" style={{ alignSelf: 'center', margin: 0 }}>From</label>
+          <input type="date" value={filters.from} onChange={(e) => set('from', e.target.value)} />
+          <label className="small-muted" style={{ alignSelf: 'center', margin: 0 }}>To</label>
+          <input type="date" value={filters.to} onChange={(e) => set('to', e.target.value)} />
+          <input placeholder="Employee name" value={filters.name} onChange={(e) => set('name', e.target.value)} />
+          <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
+            <option value="">All Departments</option>
+            {departments.map((d) => <option key={d}>{d}</option>)}
+          </select>
+          <button className="btn btn-sm" onClick={() => setFilters(emptyFilters)}>Clear</button>
+        </div>
       </div>
-      <div className="small-muted" style={{ marginBottom: 8 }}>Every device punch, paired into one session per employee per day.</div>
       <div className="tbl-wrap">
         <table>
           <thead><tr><th>Date</th><th>Code</th><th>Name</th><th>Punches</th><th>First In</th><th>Last Out</th><th>Hours</th><th>Method</th><th>Location</th><th>Late?</th></tr></thead>
           <tbody>
             {(data?.rows || []).map((r) => (
               <tr key={`${r.employeeId}-${r.date}`}>
-                <td>{r.date}</td><td>{r.employeeCode}</td><td>{r.name}</td>
-                <td>{r.punches}</td><td>{to12h(r.firstIn)}</td><td>{to12h(r.lastOut)}</td>
-                <td>{r.hours ?? '—'}</td><td>{r.method}</td><td>{r.location}</td>
-                <td><span className={`status ${r.late ? 'priority-medium' : 'priority-low'}`}>{r.late ? 'Late' : 'On time'}</span></td>
+                <td>{r.date}</td><td><b>{r.employeeCode}</b></td><td>{r.name}</td>
+                <td className="cell-muted">{r.punches}</td>
+                <td className="cell-muted">{to12h(r.firstIn)}</td>
+                <td className="cell-muted">{to12h(r.lastOut)}</td>
+                <td className="cell-muted">{r.hours ?? '—'}</td>
+                <td className="cell-muted">{r.method}</td>
+                <td className="cell-muted">{r.location}</td>
+                <td><span className={`status ${r.late ? 'pending' : 'active'}`}>{r.late ? 'Late' : 'On time'}</span></td>
               </tr>
             ))}
-            {data && data.rows.length === 0 && <tr><td colSpan="10" className="small-muted">No punches in this date range.</td></tr>}
+            {data && data.rows.length === 0 && <tr><td colSpan="10" className="small-muted" style={{ padding: 16 }}>No punches in this date range.</td></tr>}
           </tbody>
         </table>
       </div>
-      {data && <div className="small-muted" style={{ marginTop: 6 }}>{data.rows.length} session(s)</div>}
-    </div>
+      <div style={{ padding: '10px 18px' }} className="small-muted">{data?.rows.length ?? 0} session(s)</div>
+    </Panel>
   );
 }
 
@@ -308,9 +365,10 @@ function PunchLogTab() {
 
 function ReportsTab() {
   const [month, setMonth] = useState(thisMonth());
-  const [filters, setFilters] = useState({ code: '', name: '', department: '' });
+  const [filters, setFilters] = useState({ code: '', name: '', department: '', role: '' });
   const [report, setReport] = useState(null);
   const departments = useDepartments(true);
+  const roles = useRoles(true);
 
   useEffect(() => {
     api.get(`/attendance/report?month=${month}&${filterQuery(filters)}`).then((res) => setReport(res.data));
@@ -327,26 +385,35 @@ function ReportsTab() {
   const set = (k, v) => setFilters((f) => ({ ...f, [k]: v }));
 
   return (
-    <div>
-      <div className="filter-row">
-        <h3 style={{ flex: 1 }}>Monthly Attendance Report — {report?.monthLabel || month}</h3>
-        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-        {report && <button className="btn btn-sm btn-primary" onClick={exportCsv}>Export</button>}
-      </div>
-      <div className="filter-row">
-        <input placeholder="Employee ID…" value={filters.code} onChange={(e) => set('code', e.target.value)} />
-        <input placeholder="Employee name…" value={filters.name} onChange={(e) => set('name', e.target.value)} />
-        <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
-          <option value="">All Departments</option>
-          {departments.map((d) => <option key={d}>{d}</option>)}
-        </select>
+    <Panel>
+      <PanelHead title={`Monthly Attendance Report — ${report?.monthLabel || month}`}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <button className="btn btn-sm btn-primary" onClick={exportCsv} disabled={!report}>Export</button>
+        </div>
+      </PanelHead>
+      <div style={{ padding: '12px 18px' }}>
+        <div className="filter-row">
+          <input placeholder="Employee ID" value={filters.code} onChange={(e) => set('code', e.target.value)} />
+          <input placeholder="Employee name" value={filters.name} onChange={(e) => set('name', e.target.value)} />
+          <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
+            <option value="">All Departments</option>
+            {departments.map((d) => <option key={d}>{d}</option>)}
+          </select>
+          <select value={filters.role} onChange={(e) => set('role', e.target.value)}>
+            <option value="">All Roles</option>
+            {roles.map((r) => <option key={r}>{r}</option>)}
+          </select>
+        </div>
       </div>
       {report && (
-        <div className="statbar">
-          <Stat n={report.totals.present} l="Total Present Days" />
-          <Stat n={report.totals.absent} l="Total Absent Days" />
-          <Stat n={report.totals.late} l="Total Late Days" />
-          <Stat n={report.totals.halfDayCut} l="Total Half-day Cuts" />
+        <div style={{ padding: '2px 18px 14px' }}>
+          <StatRow cells={[
+            { value: report.totals.present, label: 'Total Present Days' },
+            { value: report.totals.absent, label: 'Total Absent Days' },
+            { value: report.totals.late, label: 'Total Late Days' },
+            { value: report.totals.halfDayCut, label: 'Total Half-day Cuts' },
+          ]} />
         </div>
       )}
       <div className="tbl-wrap">
@@ -355,17 +422,22 @@ function ReportsTab() {
           <tbody>
             {(report?.rows || []).map((r) => (
               <tr key={r.employeeId}>
-                <td>{r.employeeCode}</td><td>{r.name}</td><td>{r.department || '—'}</td>
-                <td>{r.workingDays}</td><td>{r.present}</td><td>{r.halfDay}</td><td>{r.absent}</td>
-                <td>{r.leave}</td><td>{r.late}</td><td>{r.halfDayCut}</td>
-                <td><b>{r.pct}%</b></td>
+                <td><b>{r.employeeCode}</b></td><td>{r.name}</td><td className="cell-muted">{r.department || '—'}</td>
+                <td style={{ textAlign: 'center' }}>{r.workingDays}</td>
+                <td style={{ textAlign: 'center' }}>{r.present}</td>
+                <td style={{ textAlign: 'center' }}>{r.halfDay}</td>
+                <td style={{ textAlign: 'center' }}>{r.absent}</td>
+                <td style={{ textAlign: 'center' }}>{r.leave}</td>
+                <td style={{ textAlign: 'center' }}>{r.late}</td>
+                <td style={{ textAlign: 'center' }}>{r.halfDayCut}</td>
+                <td style={{ textAlign: 'center' }}><b>{r.pct}%</b></td>
               </tr>
             ))}
-            {report && report.rows.length === 0 && <tr><td colSpan="11" className="small-muted">No employees match.</td></tr>}
+            {report && report.rows.length === 0 && <tr><td colSpan="11" className="small-muted" style={{ padding: 16 }}>No employees match.</td></tr>}
           </tbody>
         </table>
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -382,11 +454,12 @@ function MethodsTab({ canEdit }) {
   }
   useEffect(load, []);
 
-  async function save(e) {
-    e.preventDefault();
+  async function save(patch) {
     setError('');
+    const next = { ...policy, ...patch };
+    setPolicy(next);
     try {
-      const res = await api.put('/attendance/policy', policy);
+      const res = await api.put('/attendance/policy', next);
       setPolicy(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Could not save the policy');
@@ -394,35 +467,55 @@ function MethodsTab({ canEdit }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-      <div className="card">
-        <h3 style={{ fontSize: 13, marginBottom: 4 }}>Check-in Methods</h3>
-        <div className="small-muted" style={{ marginBottom: 8 }}>Methods your people may use to record a punch. Usage counts come from the punch log.</div>
-        {methods.map((m) => (
-          <div className="kv" key={m.method}><span className="k">{m.method}</span><span className="small-muted">{m.punches} punch(es) recorded</span></div>
-        ))}
-        <div className="small-muted" style={{ marginTop: 8, fontStyle: 'italic' }}>
-          A production check-in would additionally capture GPS location (with permission) and a face verification.
+    <TwoCol style={{ gridTemplateColumns: '1fr 1fr' }}>
+      <PanelPad>
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Check-in Methods</h3>
+        <div className="small-muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          Methods your people may use to record a punch. Usage counts are from the punch log.
         </div>
-      </div>
+        {methods.map((m) => (
+          <AssignRow flush key={m.method}>
+            <span>{m.method}</span>
+            <span className="cell-muted" style={{ fontSize: 12 }}>{m.punches} punch(es) recorded</span>
+          </AssignRow>
+        ))}
+        <div className="small-muted" style={{ fontSize: 11.5, fontStyle: 'italic', marginTop: 10 }}>
+          Prototype simulation — a production check-in would capture GPS location (with permission) and a face verification.
+        </div>
+      </PanelPad>
 
       {policy && (
-        <form className="card" onSubmit={save}>
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Attendance Policies</h3>
-          <label className="field"><span>Grace time (late after)</span><input disabled={!canEdit} value={policy.graceTime} onChange={(e) => setPolicy({ ...policy, graceTime: e.target.value })} placeholder="09:30" /></label>
-          <label className="field" style={{ marginTop: 8 }}><span>Free late arrivals per month</span><input type="number" disabled={!canEdit} value={policy.freeLateArrivalsPerMonth} onChange={(e) => setPolicy({ ...policy, freeLateArrivalsPerMonth: Number(e.target.value) })} /></label>
-          <label className="field" style={{ marginTop: 8 }}><span>Minimum hours for a half day</span><input type="number" disabled={!canEdit} value={policy.halfDayHours} onChange={(e) => setPolicy({ ...policy, halfDayHours: Number(e.target.value) })} /></label>
-          <label className="field" style={{ marginTop: 8 }}><span>Minimum hours for a full day</span><input type="number" disabled={!canEdit} value={policy.fullDayHours} onChange={(e) => setPolicy({ ...policy, fullDayHours: Number(e.target.value) })} /></label>
+        <PanelPad>
+          <h3 style={{ fontSize: 14, marginBottom: 10 }}>Attendance Policies</h3>
+          <div className="field">
+            <label>Grace time (late after)</label>
+            <input type="text" disabled={!canEdit} defaultValue={policy.graceTime} onBlur={(e) => save({ graceTime: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Free late arrivals per month</label>
+            <input type="number" disabled={!canEdit} defaultValue={policy.freeLateArrivalsPerMonth} onBlur={(e) => save({ freeLateArrivalsPerMonth: Number(e.target.value) })} />
+          </div>
+          <div className="field">
+            <label>Minimum hours for a half day</label>
+            <input type="number" disabled={!canEdit} defaultValue={policy.halfDayHours} onBlur={(e) => save({ halfDayHours: Number(e.target.value) })} />
+          </div>
+          <div className="field">
+            <label>Minimum hours for a full day</label>
+            <input type="number" disabled={!canEdit} defaultValue={policy.fullDayHours} onBlur={(e) => save({ fullDayHours: Number(e.target.value) })} />
+          </div>
           {error && <div className="error-text">{error}</div>}
-          {canEdit && <button className="btn btn-primary btn-sm" style={{ marginTop: 10 }} type="submit">Save policy</button>}
-          <div className="small-muted" style={{ marginTop: 8 }}>Late days beyond the free allowance become half-day cuts in the monthly report and in payroll.</div>
-        </form>
+          <div className="small-muted" style={{ fontSize: 11.5 }}>
+            Late days beyond the free allowance become half-day cuts in the monthly report.
+          </div>
+        </PanelPad>
       )}
-    </div>
+    </TwoCol>
   );
 }
 
 // ---- Regularization (kept from main — correcting a missed punch after the fact) ----
+// The prototype calls regularizationModalHtml(), which it never defines, so its
+// own "+ Request Regularization" button is dead; this is the working version.
 
 function RegularizationTab({ isHR }) {
   const [requests, setRequests] = useState([]);
@@ -447,62 +540,66 @@ function RegularizationTab({ isHR }) {
 
   return (
     <div>
-      <form className="card section" onSubmit={submit}>
-        <h3>Request regularization</h3>
-        <div className="grid-2">
-          <label className="field"><span>Date</span><input type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label className="field"><span>Requested Check-in</span><input value={form.requestedCheckIn} onChange={(e) => setForm({ ...form, requestedCheckIn: e.target.value })} placeholder="09:15" /></label>
-          <label className="field"><span>Requested Check-out</span><input value={form.requestedCheckOut} onChange={(e) => setForm({ ...form, requestedCheckOut: e.target.value })} placeholder="18:15" /></label>
-          <label className="field"><span>Reason</span><input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></label>
-        </div>
-        <button className="btn btn-primary btn-sm" type="submit">Submit request</button>
-      </form>
+      <PanelPad>
+        <h3 style={{ fontSize: 14, marginBottom: 10 }}>Request Regularization</h3>
+        <form onSubmit={submit}>
+          <div className="grid-2">
+            <div className="field"><label>Date *</label><input type="date" required value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></div>
+            <div className="field"><label>Requested Check-in</label><input value={form.requestedCheckIn} onChange={(e) => setForm({ ...form, requestedCheckIn: e.target.value })} placeholder="09:15" /></div>
+            <div className="field"><label>Requested Check-out</label><input value={form.requestedCheckOut} onChange={(e) => setForm({ ...form, requestedCheckOut: e.target.value })} placeholder="18:15" /></div>
+            <div className="field"><label>Reason</label><input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></div>
+          </div>
+          <button className="btn btn-primary btn-sm" type="submit">Submit request</button>
+        </form>
+      </PanelPad>
 
-      <div className="tbl-wrap">
-        <table>
-          <thead><tr>{isHR && <th>Employee</th>}<th>Date</th><th>Requested In</th><th>Requested Out</th><th>Reason</th><th>Status</th>{isHR && <th></th>}</tr></thead>
-          <tbody>
-            {requests.map((r) => (
-              <tr key={r.id}>
-                {isHR && <td>{r.employee?.name}</td>}
-                <td>{r.date}</td>
-                <td>{r.requestedCheckIn || '—'}</td>
-                <td>{r.requestedCheckOut || '—'}</td>
-                <td>{r.reason || '—'}</td>
-                <td><span className={`status ${r.status === 'Approved' ? 'priority-low' : r.status === 'Rejected' ? 'priority-high' : ''}`}>{r.status}</span></td>
-                {isHR && <td>{r.status === 'Pending' && (<><button className="btn btn-sm" onClick={() => decide(r.id, 'Approved')}>Approve</button>{' '}<button className="btn btn-sm" onClick={() => decide(r.id, 'Rejected')}>Reject</button></>)}</td>}
-              </tr>
-            ))}
-            {requests.length === 0 && <tr><td colSpan={isHR ? 7 : 5} className="small-muted">No regularization requests yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <Panel>
+        <PanelHead title="Regularization requests" />
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr>{isHR && <th>Employee</th>}<th>Date</th><th>Requested In</th><th>Requested Out</th><th>Reason</th><th>Status</th>{isHR && <th></th>}</tr></thead>
+            <tbody>
+              {requests.map((r) => (
+                <tr key={r.id}>
+                  {isHR && <td>{r.employee?.name}</td>}
+                  <td>{r.date}</td>
+                  <td className="cell-muted">{r.requestedCheckIn || '—'}</td>
+                  <td className="cell-muted">{r.requestedCheckOut || '—'}</td>
+                  <td className="cell-muted">{r.reason || '—'}</td>
+                  <td><Status>{r.status}</Status></td>
+                  {isHR && <td>{r.status === 'Pending' && (<><button className="btn btn-sm btn-primary" onClick={() => decide(r.id, 'Approved')}>Approve</button>{' '}<button className="btn btn-sm btn-danger" onClick={() => decide(r.id, 'Rejected')}>Reject</button></>)}</td>}
+                </tr>
+              ))}
+              {requests.length === 0 && <tr><td colSpan={isHR ? 7 : 5} className="small-muted" style={{ padding: 16 }}>No regularization requests yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </div>
   );
-}
-
-function Stat({ n, l }) {
-  return <div className="statitem"><div className="n">{n}</div><div className="l">{l}</div></div>;
 }
 
 export default function Attendance() {
   const { user } = useAuth();
   const isHR = HR_ROLES.includes(user?.role);
   const canEditPolicy = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role);
+  const [tab, setTab] = useState('dashboard');
 
   return (
     <TabsPage
       title="Attendance & Time"
-      subtitle="Daily marking, device punches, monthly reports and the check-in methods your people may use"
+      subtitle="Daily marking, device punches, monthly reports and the check-in methods your people may use."
+      value={tab}
+      onChange={setTab}
       tabs={[
-        { key: 'dashboard', label: 'Dashboard', element: <DashboardTab isHR={isHR} /> },
+        { key: 'dashboard', label: 'Dashboard', element: <DashboardTab isHR={isHR} goTab={setTab} /> },
         ...(isHR ? [
           { key: 'biometric', label: 'Biometric Attendance List', element: <BiometricTab /> },
           { key: 'punchlog', label: 'Punch Log (Detailed)', element: <PunchLogTab /> },
           { key: 'reports', label: 'Reports (Monthly)', element: <ReportsTab /> },
         ] : []),
-        { key: 'regularization', label: 'Regularization', element: <RegularizationTab isHR={isHR} /> },
         { key: 'methods', label: 'Check-in Methods', element: <MethodsTab canEdit={canEditPolicy} /> },
+        { key: 'regularization', label: 'Regularization', element: <RegularizationTab isHR={isHR} /> },
       ]}
     />
   );

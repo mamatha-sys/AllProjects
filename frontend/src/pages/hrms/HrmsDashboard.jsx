@@ -3,29 +3,20 @@ import { Link } from 'react-router-dom';
 import api from '../../api';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { downloadCsv } from '../../utils/csv.js';
+import { Panel, PanelPad, PanelHead, StatRow, AssignRow, EmptyMini, SectionLabel, ScopeNote, TwoCol, QaRow } from '../../components/proto.jsx';
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
-
-function Stat({ n, l, to }) {
-  const body = <><div className="n">{n}</div><div className="l">{l}</div></>;
-  return to
-    ? <Link className="statitem" to={to} style={{ textDecoration: 'none' }}>{body}</Link>
-    : <div className="statitem">{body}</div>;
-}
-
-function SectionLabel({ children }) {
-  return <div className="page-sub" style={{ fontWeight: 700, margin: '16px 0 6px' }}>{children}</div>;
-}
+const PERIODS = ['Today', 'This Week', 'This Month', 'This Quarter', 'This Year'];
 
 // The HR/manager view: every tile, panel and the CSV export are computed by
 // /api/hrms/dashboard against the same filtered employee set.
 function HrDashboard() {
-  const [filters, setFilters] = useState({ department: '', location: '', status: '', manager: '' });
+  const [filters, setFilters] = useState({ period: '', department: '', location: '', status: '', manager: '' });
   const [data, setData] = useState(null);
 
   useEffect(() => {
     const params = new URLSearchParams();
-    Object.keys(filters).forEach((k) => { if (filters[k]) params.set(k, filters[k]); });
+    Object.keys(filters).forEach((k) => { if (filters[k] && k !== 'period') params.set(k, filters[k]); });
     api.get(`/hrms/dashboard?${params.toString()}`).then((res) => setData(res.data));
   }, [filters]);
 
@@ -44,107 +35,128 @@ function HrDashboard() {
 
   return (
     <div>
-      <div className="filter-row">
+      <div className="filter-row" style={{ marginBottom: 16 }}>
+        <select value={filters.period} onChange={(e) => set('period', e.target.value)}>
+          <option value="">Date Range</option>
+          {PERIODS.map((p) => <option key={p}>{p}</option>)}
+        </select>
         <select value={filters.department} onChange={(e) => set('department', e.target.value)}>
-          <option value="">All Departments</option>
+          <option value="">Department</option>
           {o.departments.map((d) => <option key={d}>{d}</option>)}
         </select>
         <select value={filters.location} onChange={(e) => set('location', e.target.value)}>
-          <option value="">All Locations</option>
+          <option value="">Location</option>
           {o.locations.map((l) => <option key={l}>{l}</option>)}
         </select>
         <select value={filters.status} onChange={(e) => set('status', e.target.value)}>
-          <option value="">All Employee Statuses</option>
+          <option value="">Employee Status</option>
           {o.statuses.map((s) => <option key={s}>{s}</option>)}
         </select>
         <select value={filters.manager} onChange={(e) => set('manager', e.target.value)}>
-          <option value="">All Reporting Managers</option>
+          <option value="">Reporting Manager</option>
           {o.managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
-        {anyFilter && <button className="btn btn-sm" onClick={() => setFilters({ department: '', location: '', status: '', manager: '' })}>Clear Filters</button>}
-        <button className="btn btn-sm btn-primary" onClick={exportCsv}>Export</button>
+        {anyFilter && <button className="btn btn-sm" onClick={() => setFilters({ period: '', department: '', location: '', status: '', manager: '' })}>Clear Filters</button>}
+        <button className="btn btn-sm btn-primary" style={{ marginLeft: 'auto' }} onClick={exportCsv}>Export</button>
       </div>
 
       {data.employeeOverview.total === 0 && (
-        <div className="small-muted">No employee records match these filters — the counts below are genuinely zero, not placeholders.</div>
+        <ScopeNote>No employee records match these filters — the counts below are genuinely zero, not placeholders.</ScopeNote>
       )}
 
       <SectionLabel>Employee Overview</SectionLabel>
-      <div className="statbar">
-        <Stat n={data.employeeOverview.total} l="Total Employees" to="/employees" />
-        <Stat n={data.employeeOverview.active} l="Active" />
-        <Stat n={data.employeeOverview.newJoiners30d} l="New Joiners (30d)" />
-        <Stat n={data.employeeOverview.onLeaveToday} l="On Leave Today" to="/leave" />
-        <Stat n={data.employeeOverview.servingNotice} l="Serving Notice" />
-        <Stat n={data.employeeOverview.exitProcess} l="Exit Process" />
-        <Stat n={data.employeeOverview.relieved} l="Relieved" />
-      </div>
+      <StatRow cells={[
+        { value: data.employeeOverview.total, label: 'Total Employees', to: '/employees' },
+        { value: data.employeeOverview.active, label: 'Active' },
+        { value: data.employeeOverview.newJoiners30d, label: 'New Joiners (30d)' },
+        { value: data.employeeOverview.onLeaveToday, label: 'On Leave Today', to: '/leave' },
+        { value: data.employeeOverview.servingNotice, label: 'Serving Notice' },
+        { value: data.employeeOverview.exitProcess, label: 'Exit Process' },
+        { value: data.employeeOverview.relieved, label: 'Relieved' },
+      ]} />
 
       <SectionLabel>Attendance Overview (Today)</SectionLabel>
-      <div className="statbar">
-        <Stat n={data.attendanceOverview.present} l="Present" to="/attendance" />
-        <Stat n={data.attendanceOverview.absent} l="Absent" to="/attendance" />
-        <Stat n={data.attendanceOverview.late} l="Late" to="/attendance" />
-        <Stat n={data.attendanceOverview.halfDay} l="Half Day" to="/attendance" />
-        <Stat n={data.attendanceOverview.missingPunch} l="Missing Punch" to="/attendance" />
-        <Stat n={data.attendanceOverview.regularizationPending} l="Regularization Pending" to="/attendance" />
-      </div>
+      <StatRow cells={[
+        { value: data.attendanceOverview.present, label: 'Present', to: '/attendance' },
+        { value: data.attendanceOverview.absent, label: 'Absent', to: '/attendance' },
+        { value: data.attendanceOverview.late, label: 'Late', to: '/attendance' },
+        { value: data.attendanceOverview.halfDay, label: 'Half Day', to: '/attendance' },
+        { value: data.attendanceOverview.missingPunch, label: 'Missing Punch', to: '/attendance' },
+        { value: data.attendanceOverview.regularizationPending, label: 'Regularization Pending', to: '/attendance' },
+      ]} />
 
       <SectionLabel>Leave Overview</SectionLabel>
-      <div className="statbar">
-        <Stat n={data.leaveOverview.total} l="Leave Requests" to="/leave" />
-        <Stat n={data.leaveOverview.pending} l="Pending Approvals" to="/leave" />
-        <Stat n={data.leaveOverview.approved} l="Approved" to="/leave" />
-        <Stat n={data.leaveOverview.rejected} l="Rejected" to="/leave" />
-        <Stat n={data.leaveOverview.upcoming} l="Upcoming Leaves" to="/leave" />
+      <StatRow cells={[
+        { value: data.leaveOverview.total, label: 'Leave Requests', to: '/leave' },
+        { value: data.leaveOverview.pending, label: 'Pending Approvals', to: '/leave' },
+        { value: data.leaveOverview.approved, label: 'Approved', to: '/leave' },
+        { value: data.leaveOverview.rejected, label: 'Rejected', to: '/leave' },
+        { value: data.leaveOverview.upcoming, label: 'Upcoming Leaves', to: '/leave' },
+      ]} />
+
+      <div style={{ marginTop: 16 }}>
+        <PanelPad>
+          <h3 style={{ marginBottom: 12, fontSize: 14 }}>Pending Tasks &amp; Approvals</h3>
+          <StatRow cells={[
+            { value: data.pendingTasks.leaveApprovals, label: 'Leave Approvals', to: '/leave' },
+            { value: data.pendingTasks.attendanceRegularization, label: 'Attendance Regularization', to: '/attendance' },
+            { value: data.pendingTasks.assetsAssigned, label: 'Assets Assigned', to: '/employee-services' },
+            { value: data.pendingTasks.trainingPending, label: 'Training Pending', to: '/performance' },
+            { value: data.pendingTasks.openTargets, label: 'Open Targets', to: '/performance' },
+            { value: data.pendingTasks.openTickets, label: 'Open Tickets', to: '/employee-services' },
+          ]} />
+        </PanelPad>
       </div>
 
-      <SectionLabel>Pending Tasks & Approvals</SectionLabel>
-      <div className="statbar">
-        <Stat n={data.pendingTasks.leaveApprovals} l="Leave Approvals" to="/leave" />
-        <Stat n={data.pendingTasks.attendanceRegularization} l="Attendance Regularization" to="/attendance" />
-        <Stat n={data.pendingTasks.assetsAssigned} l="Assets Assigned" to="/employee-services" />
-        <Stat n={data.pendingTasks.trainingPending} l="Training Pending" to="/performance" />
-        <Stat n={data.pendingTasks.openTargets} l="Open Targets" to="/performance" />
-        <Stat n={data.pendingTasks.openTickets} l="Open Tickets" to="/employee-services" />
-      </div>
+      <TwoCol>
+        <Panel>
+          <PanelHead title="Headcount by Department" />
+          {data.headcountByDepartment.length === 0
+            ? <EmptyMini>No employees in scope.</EmptyMini>
+            : data.headcountByDepartment.map((d) => (
+              <AssignRow key={d.department}>
+                <span>{d.department}</span>
+                <span className="cell-muted" style={{ fontSize: 11.5 }}>{d.employees} employee(s)</span>
+              </AssignRow>
+            ))}
+        </Panel>
+        <Panel>
+          <PanelHead title="Birthdays & Anniversaries (next 30 days)" />
+          {data.celebrations.length === 0
+            ? <EmptyMini>None in the next 30 days.</EmptyMini>
+            : data.celebrations.map((c) => (
+              <AssignRow key={`${c.name}-${c.kind}`}>
+                <span>{c.name} <span className="cell-muted" style={{ fontSize: 11.5 }}>— {c.kind}</span></span>
+                <span className="cell-muted" style={{ fontSize: 11.5 }}>{String(c.date).slice(0, 10)}</span>
+              </AssignRow>
+            ))}
+        </Panel>
+      </TwoCol>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Headcount by Department</h3>
-          {data.headcountByDepartment.map((d) => (
-            <div className="kv" key={d.department}><span className="k">{d.department}</span><span>{d.employees} employee(s)</span></div>
-          ))}
-          {data.headcountByDepartment.length === 0 && <div className="small-muted">No employees in scope.</div>}
-        </div>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Birthdays & Anniversaries (next 30 days)</h3>
-          {data.celebrations.map((c) => (
-            <div className="kv" key={`${c.name}-${c.kind}`}>
-              <span className="k">{c.name} <span className="small-muted">— {c.kind}</span></span>
-              <span className="small-muted">{String(c.date).slice(0, 10)}</span>
-            </div>
-          ))}
-          {data.celebrations.length === 0 && <div className="small-muted">None in the next 30 days.</div>}
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Announcements</h3>
-          {data.announcements.map((a) => (
-            <div className="kv" key={a.id}><span className="k">{a.title} <span className="small-muted">— {a.category || 'General'}</span></span><span className="small-muted">{a.date}</span></div>
-          ))}
-          {data.announcements.length === 0 && <div className="small-muted">No announcements posted.</div>}
-        </div>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Upcoming Holidays</h3>
-          {data.upcomingHolidays.map((h) => (
-            <div className="kv" key={h.id}><span className="k">{h.name} <span className="small-muted">— {h.type || 'Holiday'}</span></span><span className="small-muted">{h.date}</span></div>
-          ))}
-          {data.upcomingHolidays.length === 0 && <div className="small-muted">No upcoming holidays configured.</div>}
-        </div>
-      </div>
+      <TwoCol>
+        <Panel>
+          <PanelHead title="Announcements" />
+          {data.announcements.length === 0
+            ? <EmptyMini>No announcements posted.</EmptyMini>
+            : data.announcements.map((a) => (
+              <AssignRow key={a.id}>
+                <span>{a.title} <span className="cell-muted" style={{ fontSize: 11.5 }}>— {a.category || 'General'}</span></span>
+                <span className="cell-muted" style={{ fontSize: 11.5 }}>{a.date}</span>
+              </AssignRow>
+            ))}
+        </Panel>
+        <Panel>
+          <PanelHead title="Upcoming Holidays" />
+          {data.upcomingHolidays.length === 0
+            ? <EmptyMini>No upcoming holidays configured.</EmptyMini>
+            : data.upcomingHolidays.map((h) => (
+              <AssignRow key={h.id}>
+                <span>{h.name}</span>
+                <span className="cell-muted" style={{ fontSize: 11.5 }}>{h.date}</span>
+              </AssignRow>
+            ))}
+        </Panel>
+      </TwoCol>
     </div>
   );
 }
@@ -168,38 +180,44 @@ function MyDashboard() {
   const today = new Date().toISOString().slice(0, 10);
   const todayRecord = attendance.find((a) => a.date === today);
   const myBalances = balances?.rows?.[0]?.balances || [];
+  const upcoming = holidays.filter((h) => h.date >= today);
 
   return (
     <div>
       <SectionLabel>My Day</SectionLabel>
-      <div className="statbar">
-        <Stat n={todayRecord?.status || 'Not marked'} l="Today's Attendance" to="/attendance" />
-        <Stat n={leave.filter((l) => l.status === 'Pending').length} l="Leave Pending" to="/leave" />
-        <Stat n={leave.filter((l) => l.status === 'Approved').length} l="Leave Approved" to="/leave" />
-      </div>
+      <StatRow columns={3} cells={[
+        { value: todayRecord?.status || 'Not marked', label: "Today's Attendance", to: '/attendance' },
+        { value: leave.filter((l) => l.status === 'Pending').length, label: 'Leave Pending', to: '/leave' },
+        { value: leave.filter((l) => l.status === 'Approved').length, label: 'Leave Approved', to: '/leave' },
+      ]} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>My Leave Balances</h3>
-          {myBalances.map((b) => (
-            <div className="kv" key={b.code}><span className="k">{b.type}</span><span>{b.total == null ? '—' : `${b.remaining} / ${b.total}`}</span></div>
-          ))}
-          {myBalances.length === 0 && <div className="small-muted">No balances configured yet.</div>}
-        </div>
-        <div className="card">
-          <h3 style={{ fontSize: 13, marginBottom: 8 }}>Upcoming Holidays</h3>
-          {holidays.filter((h) => h.date >= today).slice(0, 4).map((h) => (
-            <div className="kv" key={h.id}><span className="k">{h.name}</span><span className="small-muted">{h.date}</span></div>
-          ))}
-          {holidays.filter((h) => h.date >= today).length === 0 && <div className="small-muted">None configured.</div>}
-        </div>
-      </div>
+      <TwoCol style={{ marginTop: 16 }}>
+        <Panel>
+          <PanelHead title="My Leave Balances" />
+          {myBalances.length === 0
+            ? <EmptyMini>No balances configured yet.</EmptyMini>
+            : myBalances.map((b) => (
+              <AssignRow key={b.code}><span>{b.type}</span><b>{b.total == null ? '—' : `${b.remaining} / ${b.total}`}</b></AssignRow>
+            ))}
+        </Panel>
+        <Panel>
+          <PanelHead title="Upcoming Holidays" />
+          {upcoming.length === 0
+            ? <EmptyMini>None configured.</EmptyMini>
+            : upcoming.slice(0, 4).map((h) => (
+              <AssignRow key={h.id}><span>{h.name}</span><span className="cell-muted" style={{ fontSize: 11.5 }}>{h.date}</span></AssignRow>
+            ))}
+        </Panel>
+      </TwoCol>
 
-      <div className="card section" style={{ marginTop: 16 }}>
-        <h3 style={{ fontSize: 13, marginBottom: 8 }}>Announcements</h3>
-        {announcements.slice(0, 3).map((a) => <div className="kv" key={a.id}><span className="k">{a.title}</span><span className="small-muted">{a.date}</span></div>)}
-        {announcements.length === 0 && <div className="small-muted">No announcements posted.</div>}
-      </div>
+      <Panel style={{ marginTop: 16 }}>
+        <PanelHead title="Announcements" />
+        {announcements.length === 0
+          ? <EmptyMini>No announcements posted.</EmptyMini>
+          : announcements.slice(0, 3).map((a) => (
+            <AssignRow key={a.id}><span>{a.title}</span><span className="cell-muted" style={{ fontSize: 11.5 }}>{a.date}</span></AssignRow>
+          ))}
+      </Panel>
     </div>
   );
 }
@@ -210,22 +228,22 @@ export default function HrmsDashboard() {
 
   return (
     <div>
-      <div className="page-head"><div><h1>HRMS Dashboard</h1><div className="page-sub">Employee & workforce management at a glance</div></div></div>
+      <div className="page-head"><div><h1>HRMS Dashboard</h1><div className="page-sub">Employee &amp; Workforce Management</div></div></div>
 
       {isHR ? <HrDashboard /> : <MyDashboard />}
 
-      <div className="card section" style={{ marginTop: 16 }}>
+      <PanelPad>
         <h3 style={{ fontSize: 14, marginBottom: 10 }}>Quick Actions</h3>
-        <div className="qa-row">
-          <Link className="btn btn-sm" to="/attendance">Attendance & Time</Link>
-          <Link className="btn btn-sm" to="/leave">Leave & Holidays</Link>
-          <Link className="btn btn-sm" to="/payroll">Payroll & Compensation</Link>
-          <Link className="btn btn-sm" to="/performance">Performance & Development</Link>
+        <QaRow>
+          <Link className="btn btn-sm" to="/attendance">Attendance</Link>
+          <Link className="btn btn-sm" to="/leave">Leave Requests</Link>
+          <Link className="btn btn-sm" to="/payroll">Process Payroll</Link>
+          <Link className="btn btn-sm" to="/performance">Performance</Link>
           <Link className="btn btn-sm" to="/employee-services">Employee Services</Link>
           {isHR && <Link className="btn btn-sm" to="/employees">Employee Management</Link>}
           {!isHR && <Link className="btn btn-sm" to="/my-profile">My Profile</Link>}
-        </div>
-      </div>
+        </QaRow>
+      </PanelPad>
     </div>
   );
 }

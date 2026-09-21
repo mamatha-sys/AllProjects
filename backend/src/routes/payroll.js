@@ -112,7 +112,10 @@ router.get('/policy', async (req, res) => {
 });
 
 router.put('/policy', requireRole('SUPER_ADMIN', 'ADMIN'), async (req, res) => {
-  const { unmarkedDaysUnpaid, weekendsPaid, paidLeaveDaysPerMonth } = req.body;
+  const {
+    unmarkedDaysUnpaid, weekendsPaid, paidLeaveDaysPerMonth,
+    payByHours, halfDayBySession, sessionSplit, halfDayHours, fullDayHours,
+  } = req.body;
   const config = await getPolicy();
   const updated = await prisma.hrConfig.update({
     where: { id: config.id },
@@ -120,6 +123,14 @@ router.put('/policy', requireRole('SUPER_ADMIN', 'ADMIN'), async (req, res) => {
       unmarkedDaysUnpaid: typeof unmarkedDaysUnpaid === 'boolean' ? unmarkedDaysUnpaid : undefined,
       weekendsPaid: typeof weekendsPaid === 'boolean' ? weekendsPaid : undefined,
       paidLeaveDaysPerMonth: paidLeaveDaysPerMonth != null ? Number(paidLeaveDaysPerMonth) : undefined,
+      // The rest of the prototype's "How attendance affects pay" switches. Its
+      // "minimum hours for a full / half day" are the same halfDayHours /
+      // fullDayHours the attendance policy edits.
+      payByHours: typeof payByHours === 'boolean' ? payByHours : undefined,
+      halfDayBySession: typeof halfDayBySession === 'boolean' ? halfDayBySession : undefined,
+      sessionSplit: sessionSplit != null ? String(sessionSplit) : undefined,
+      halfDayHours: halfDayHours != null ? Number(halfDayHours) : undefined,
+      fullDayHours: fullDayHours != null ? Number(fullDayHours) : undefined,
     },
   });
   await logAudit({ userId: req.user.id, action: 'Payroll policy updated', entity: 'HrConfig', entityId: updated.id });
