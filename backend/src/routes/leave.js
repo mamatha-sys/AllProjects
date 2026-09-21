@@ -273,7 +273,14 @@ router.put('/reasons/:id', requireRole(...POLICY_ROLES), async (req, res) => {
 router.get('/concurrency-policy', async (req, res) => {
   let cfg = await prisma.hrConfig.findFirst();
   if (!cfg) cfg = await prisma.hrConfig.create({ data: {} });
-  res.json({ concurrentLeaveCapPct: cfg.concurrentLeaveCapPct, concurrentLeaveCapFlat: cfg.concurrentLeaveCapFlat, leaveReasonThresholdDays: cfg.leaveReasonThresholdDays });
+  res.json({
+    concurrentLeaveCapPct: cfg.concurrentLeaveCapPct,
+    concurrentLeaveCapFlat: cfg.concurrentLeaveCapFlat,
+    leaveReasonThresholdDays: cfg.leaveReasonThresholdDays,
+    // The approval escalation order, which the Leave Approval Chain panel
+    // prints as its first three links.
+    escalationOrder: String(cfg.escalationOrder || '').split(',').map((r) => r.trim()).filter(Boolean),
+  });
 });
 
 router.put('/concurrency-policy', requireRole(...POLICY_ROLES), async (req, res) => {

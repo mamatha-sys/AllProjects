@@ -415,6 +415,7 @@ model Employee {
   salaryStructure        SalaryStructure?
   fnfRequests            FnfRequest[]
   leaveBalances          LeaveBalance[]
+  assetsHeld             Asset[]
 }
 
 // Generic table backing the smaller, similarly-shaped HRMS self-service areas
@@ -444,6 +445,15 @@ model EmployeeRecord {
   escalated  Boolean  @default(false)
   csat       Int?     // 1-5 satisfaction rating, set after resolution
   notes      String?  // JSON array of {author, text, internal}
+  // Columns the prototype's Performance & Development screens need. All
+  // nullable, so every other record type is unaffected.
+  achieved   Float?   // TARGET: achieved vs `amount` (the target)
+  unit       String?  // TARGET: the unit both figures are counted in (e.g. "hires")
+  fromName   String?  // KT: who ran the session · RECOGNITION: who gave the award
+  toName     String?  // KT: who received the handover
+  raisedBy   String?  // DISCIPLINARY: who logged the case
+  points     Int?     // RECOGNITION: award points, which drive the leaderboard
+  aiNote     String?  // WEEKLY_IDEA: the AI review note recorded with the decision
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
@@ -889,6 +899,15 @@ model HrConfig {
   concurrentLeaveCapPct         Int    @default(30)
   concurrentLeaveCapFlat        Int    @default(2)
   leaveReasonThresholdDays      Int    @default(4)
+  // Payroll policy — the rest of the prototype's "How attendance affects pay"
+  // switches. Its "minimum hours for a full/half day" read the fullDayHours /
+  // halfDayHours above, which are the same numbers.
+  payByHours                    Boolean @default(false)
+  halfDayBySession              Boolean @default(false)
+  sessionSplit                  String  @default("13:00")
+  // Approval escalation order (comma-separated roles) — a leave, attendance
+  // regularization or issue request climbs this chain top to bottom.
+  escalationOrder               String  @default("Recruiter,TL,Manager,Admin,Super Admin")
 }
 
 // =============================================================================
@@ -929,4 +948,23 @@ model RoleAccess {
   updatedAt     DateTime @updatedAt
 
   @@unique([role, moduleId])
+}
+
+// Company asset inventory — the prototype's Employee Services → Assets tab
+// tracks assets that may be unassigned, so this is its own table rather than a
+// per-employee EmployeeRecord. Employee-raised asset *requests* stay on
+// EmployeeRecord(type: 'ASSET') and feed the Asset Approval screen.
+model Asset {
+  id            String    @id @default(cuid())
+  assetCode     String    @unique
+  name          String
+  category      String    @default("Laptop")
+  status        String    @default("Available") // Available | Assigned | In Repair | Retired
+  assignedToId  String?
+  assignedTo    Employee? @relation(fields: [assignedToId], references: [id])
+  purchaseDate  String?
+  warrantyUntil String?
+  history       String    @default("[]") // JSON array of {at, by, text}
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }

@@ -28,8 +28,10 @@ const atsExtrasRoutes = require('./routes/atsExtras');
 const employeeRecordRouter = require('./routes/employeeRecords');
 const shiftPatternRoutes = require('./routes/shiftPatterns');
 const helpdeskRoutes = require('./routes/helpdesk');
+const assetInventoryRoutes = require('./routes/assetInventory');
 const resignationRoutes = require('./routes/resignations');
 const hrmsDashboardRoutes = require('./routes/hrmsDashboard');
+const escalationRoutes = require('./routes/escalation');
 
 const HR_ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'ASSISTANT_MANAGER', 'STL', 'TL'];
 
@@ -63,6 +65,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/office-expenses', officeRoutes);
 app.use('/api/ats', atsExtrasRoutes);
 app.use('/api/hrms/dashboard', hrmsDashboardRoutes);
+app.use('/api/hrms/escalation', escalationRoutes);
 
 // EmployeeRecord-backed HRMS long-tail areas — one generic model, one route per type.
 // Helpdesk and Resignation still store EmployeeRecord rows but have their own
@@ -78,6 +81,9 @@ app.use('/api/timesheet', employeeRecordRouter('TIMESHEET'));
 app.use('/api/assets', employeeRecordRouter('ASSET', { createRoles: HR_ROLES }));
 app.use('/api/expenses', employeeRecordRouter('EXPENSE'));
 app.use('/api/helpdesk', helpdeskRoutes);
+// Company asset inventory (Employee Services → Assets). /api/assets above stays
+// as the employee-raised asset *request* list, which feeds Asset Approval.
+app.use('/api/asset-inventory', assetInventoryRoutes);
 app.use('/api/access-requests', employeeRecordRouter('ACCESS_REQUEST'));
 app.use('/api/weekly-ideas', employeeRecordRouter('WEEKLY_IDEA'));
 app.use('/api/shift-patterns', shiftPatternRoutes);

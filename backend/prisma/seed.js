@@ -577,8 +577,20 @@ async function main() {
   await prisma.employeeRecord.create({ data: { type: 'EXPENSE', employeeId: empKiran.id, title: 'Client site travel', detail: 'Cab fare for Orbit Software client visit', status: 'Pending', category: 'Travel', location: 'Hyderabad', amount: 850, date: today } });
   await prisma.employeeRecord.create({ data: { type: 'TIMESHEET', employeeId: empDivya.id, title: 'Client Portal Revamp', status: 'Logged', hours: 6.5, date: today } });
   await prisma.employeeRecord.create({ data: { type: 'SHIFT', employeeId: empMeera.id, title: 'General Shift (9:00–18:00)', status: 'Scheduled', date: today } });
-  await prisma.employeeRecord.create({ data: { type: 'RECOGNITION', employeeId: empKiran.id, title: 'Recruiter of the Month', detail: 'Highest offers-to-joins ratio in Q3.', status: 'Awarded', date: '2026-09-01' } });
-  await prisma.employeeRecord.create({ data: { type: 'TARGET', employeeId: empKiran.id, title: '5 confirmed joins this quarter', status: 'In Progress', date: '2026-12-31', progressPct: 40 } });
+  await prisma.employeeRecord.create({ data: { type: 'RECOGNITION', employeeId: empKiran.id, title: 'Above & Beyond', detail: 'Highest offers-to-joins ratio in Q3.', status: 'Awarded', date: '2026-09-01', fromName: 'Vasu (Admin)', points: 50 } });
+  await prisma.employeeRecord.create({ data: { type: 'TARGET', employeeId: empKiran.id, title: '5 confirmed joins this quarter', status: 'In Progress', date: '2026-12', progressPct: 40, amount: 5, achieved: 2, unit: 'joins' } });
+  await prisma.employeeRecord.create({ data: { type: 'KT', employeeId: empDivya.id, title: 'Client Portal handover', status: 'In Progress', date: today, fromName: empDivya.name, toName: empMeera.name } });
+
+  // Company asset inventory (Employee Services → Assets). Kept separate from the
+  // employee-raised ASSET requests above, which feed the Asset Approval screen.
+  await prisma.asset.createMany({
+    data: [
+      { assetCode: 'AST-0001', name: 'Dell Latitude 5420', category: 'Laptop', status: 'Assigned', assignedToId: empDivya.id, purchaseDate: '2022-01-15', warrantyUntil: '2025-01-15', history: JSON.stringify([{ at: '2022-01-15 10:00', by: 'HR', text: `Assigned to ${empDivya.name}` }]) },
+      { assetCode: 'AST-0002', name: 'MacBook Air M2', category: 'Laptop', status: 'Available', purchaseDate: '2024-06-02', warrantyUntil: '2027-06-02', history: '[]' },
+      { assetCode: 'AST-0003', name: 'Dell 24" Monitor', category: 'Monitor', status: 'In Repair', purchaseDate: '2023-03-11', history: JSON.stringify([{ at: '2026-09-01 09:00', by: 'HR', text: 'Sent for repair' }]) },
+      { assetCode: 'AST-0004', name: 'iPhone 13', category: 'Mobile', status: 'Assigned', assignedToId: empKiran.id, purchaseDate: '2023-08-20', warrantyUntil: '2025-08-20', history: JSON.stringify([{ at: '2023-08-20 11:00', by: 'HR', text: `Assigned to ${empKiran.name}` }]) },
+    ],
+  });
 
   await prisma.auditLog.create({ data: { userId: admin.id, action: 'Demo data seeded', entity: 'System' } });
 

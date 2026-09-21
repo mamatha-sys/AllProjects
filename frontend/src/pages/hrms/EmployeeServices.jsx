@@ -1,4 +1,4 @@
-import TabsPage from '../../components/TabsPage.jsx';
+import { useState } from 'react';
 import Helpdesk from './Helpdesk.jsx';
 import Assets from './Assets.jsx';
 import Announcements from './Announcements.jsx';
@@ -11,24 +11,56 @@ import Expenses from './Expenses.jsx';
 import AccessManagement from './AccessManagement.jsx';
 import WeeklyIdeas from './WeeklyIdeas.jsx';
 
+// The prototype's five Employee Services tabs, each with its own page head
+// (servicesView, line 4466). The remaining self-service areas main carries —
+// documents, shift roster, timesheet, expenses, access and ideas — follow them.
+const PROTO_TABS = [
+  ['helpdesk', 'Help Desk', 'Helpdesk', 'Track and resolve employee IT/HR/Admin/Grievance/Facilities/Payroll tickets.'],
+  ['assets', 'Assets', 'Asset Management', 'Company asset inventory, allocation, transfers, maintenance and audit.'],
+  ['announcements', 'Announcements', 'Announcements', 'Company-wide notice board.'],
+  ['survey', 'Engagement Survey', 'Employee Engagement Surveys', 'Create pulse surveys and review aggregated results.'],
+  ['resignation', 'Resignation', 'Resignation', 'Notice period, last working day, exit checklist and relieving.'],
+];
+
+const EXTRA_TABS = [
+  ['documents', 'Documents', 'Documents', 'Policies, compliance documents and acknowledgements.', Documents],
+  ['shift', 'Shift Roster', 'Shift & Roster', 'Shift patterns and who is rostered on which day.', ShiftRoster],
+  ['timesheet', 'Timesheet', 'Timesheet', 'Hours logged against tasks.', Timesheet],
+  ['expenses', 'Expense Claims', 'Expense & Travel Claims', 'Claims, approvals and reimbursement.', Expenses],
+  ['access', 'Access Management', 'Access Management', 'System and resource access requests.', AccessManagement],
+  ['ideas', 'Weekly Ideas', 'Weekly Ideas', 'Weekly idea contributions and their review.', WeeklyIdeas],
+];
+
 export default function EmployeeServices() {
+  const [tab, setTab] = useState('helpdesk');
+  // Which feature-tile screen is open, per tab — the prototype's svcView.
+  const [view, setView] = useState(null);
+
+  function selectTab(k) { setTab(k); setView(null); }
+  const open = (key) => setView(key);
+  const back = () => setView(null);
+
+  const proto = PROTO_TABS.find(([k]) => k === tab);
+  const extra = EXTRA_TABS.find(([k]) => k === tab);
+  const [, , title, sub] = proto || extra;
+
+  let body = null;
+  if (tab === 'helpdesk') body = <Helpdesk view={view} onOpen={open} onBack={back} />;
+  else if (tab === 'assets') body = <Assets view={view} onOpen={open} onBack={back} />;
+  else if (tab === 'announcements') body = <Announcements view={view} onOpen={open} onBack={back} />;
+  else if (tab === 'survey') body = <Surveys view={view} onOpen={open} onBack={back} />;
+  else if (tab === 'resignation') body = <Resignation />;
+  else if (extra) { const C = extra[4]; body = <C />; }
+
   return (
-    <TabsPage
-      title="Employee Services"
-      subtitle="Help desk, assets, announcements, surveys and resignation — plus the rest of self-service"
-      tabs={[
-        { key: 'helpdesk', label: 'Help Desk', element: <Helpdesk /> },
-        { key: 'assets', label: 'Assets', element: <Assets /> },
-        { key: 'announcements', label: 'Announcements', element: <Announcements /> },
-        { key: 'surveys', label: 'Engagement Survey', element: <Surveys /> },
-        { key: 'resignation', label: 'Resignation', element: <Resignation /> },
-        { key: 'documents', label: 'Documents', element: <Documents /> },
-        { key: 'shift', label: 'Shift Roster', element: <ShiftRoster /> },
-        { key: 'timesheet', label: 'Timesheet', element: <Timesheet /> },
-        { key: 'expenses', label: 'Expense Claims', element: <Expenses /> },
-        { key: 'access', label: 'Access Management', element: <AccessManagement /> },
-        { key: 'ideas', label: 'Weekly Ideas', element: <WeeklyIdeas /> },
-      ]}
-    />
+    <div>
+      <div className="page-head"><div><h1>{title}</h1><div className="page-sub">{sub}</div></div></div>
+      <div className="tabbar">
+        {[...PROTO_TABS, ...EXTRA_TABS].map(([k, label]) => (
+          <button key={k} className={'tab-btn' + (tab === k ? ' active' : '')} onClick={() => selectTab(k)}>{label}</button>
+        ))}
+      </div>
+      <div className="tab-content">{body}</div>
+    </div>
   );
 }
