@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import Modal, { SectionHead } from '../components/Modal.jsx';
 import {
   DEPTS, LOCS, PRIORITIES, REQUIREMENT_TYPES, EDUCATION_LEVELS, EMPLOYMENT_TYPES, WORK_MODES,
   JOINING_TIMELINES, NOTICE_PERIODS_MAX, JOB_PREFERENCES, SALARY_TYPES, CURRENCIES,
+  POSTING_SOURCES, priorityBadgeClass,
   requirementStatusLabel, agreementStatusLabel,
 } from '../atsVocab';
 
-// The prototype's Create Requirement modal (openAddRequirementModal, line 6956)
-// in its section order: A Basic Information, B Client Information,
-// C Job Description, D Job Conditions, E Compensation, F Assignment.
+// The prototype's Jobs / Requirements screen: requirementListShell() (6917),
+// renderRequirementList() (6937), openRequirementsHtml() (6832),
+// agreementMonthHtml() (6906) and the Create Requirement modal
+// openAddRequirementModal() (6956) with its seven lettered sections.
 const EMPTY = {
   type: 'Client Requirement',
   title: '',
@@ -42,51 +45,98 @@ const EMPTY = {
   bdeId: '',
   tl: '',
   stl: '',
+  postingSources: [],
 };
 
-function priorityClass(priority) {
-  if (priority === 'Urgent' || priority === 'High') return 'priority-high';
-  if (priority === 'Medium') return 'priority-medium';
-  return 'priority-low';
-}
+const MONTH = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return { key: d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }), at: d };
+};
 
 export default function Requirements() {
+  const navigate = useNavigate();
   const [requirements, setRequirements] = useState([]);
   const [clients, setClients] = useState([]);
   const [team, setTeam] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [showForm, setShowForm] = useState(false);
+  const [preview, setPreview] = useState(false);
   const [error, setError] = useState('');
-  // The prototype's filter row: search, client, status.
+  // The prototype's three tabs: All Requirements / Open Requirements / Agreement Report.
+  const [view, setView] = useState('all');
+  // "All Requirements" filter row: search, client, status.
   const [search, setSearch] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  // "Open Requirements" filter row: department, client, recruiter, priority.
+  const [openFilters, setOpenFilters] = useState({ dept: '', client: '', recruiter: '', priority: '' });
 
   const internal = form.type === 'Internal Requirement';
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const setOpenFilter = (patch) => setOpenFilters((f) => ({ ...f, ...patch }));
 
   function load() {
     api.get('/requirements').then((res) => setRequirements(res.data));
   }
   useEffect(() => {
     load();
-    api.get('/clients').then((res) => setClients(res.data));
+    api.get('/clients').then((res) => setClients(res.data)).catch(() => setClients([]));
     api.get('/ats/team').then((res) => setTeam(res.data)).catch(() => setTeam([]));
   }, []);
 
   const selectedClient = clients.find((c) => c.id === form.clientId);
   const recruiters = team.filter((t) => t.role === 'RECRUITER');
   const bdes = team.filter((t) => t.role === 'BDE');
+  const tls = team.filter((t) => t.role === 'TL');
+  const stls = team.filter((t) => t.role === 'STL');
+
+  const clientNameOf = (r) => (r.internal ? 'TeamLink Internal' : r.client?.name || '—');
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return requirements.filter((r) => {
       if (q && !(`${r.title} ${r.skills || ''}`.toLowerCase().includes(q))) return false;
-      if (clientFilter && r.clientId !== clientFilter) return false;
-      if (statusFilter && r.status !== statusFilter) return false;
+      if (clientFilter && clientNameOf(r) !== clientFilter) return false;
+      if (statusFilter && requirementStatusLabel(r.status) !== statusFilter) return false;
       return true;
     });
   }, [requirements, search, clientFilter, statusFilter]);
+
+  const openRows = useMemo(() => requirements.filter((r) => {
+    if (r.status !== 'OPEN') return false;
+    if (openFilters.dept && r.department !== openFilters.dept) return false;
+    if (openFilters.client && clientNameOf(r) !== openFilters.client) return false;
+    if (openFilters.recruiter && r.recruiter?.name !== openFilters.recruiter) return false;
+    if (openFilters.priority && r.priority !== openFilters.priority) return false;
+    return true;
+  }), [requirements, openFilters]);
+
+  const usedClientNames = useMemo(
+    () => [...new Set(requirements.map(clientNameOf))].sort(),
+    [requirements],
+  );
+
+  // The prototype's agreementMonthReport() — counts derived from each client's
+  // own agreement milestones, months with no activity are not shown.
+  const agreementMonths = useMemo(() => {
+    const months = {};
+    const bump = (value, key) => {
+      const m = MONTH(value);
+      if (!m) return;
+      months[m.key] = months[m.key] || { created: 0, signed: 0, active: 0, expired: 0, pending: 0, at: m.at };
+      months[m.key][key] += 1;
+    };
+    clients.forEach((c) => {
+      bump(c.createdAt, 'created');
+      if (c.agreementSignedAt) bump(c.agreementSignedAt, 'signed');
+      if (c.agreementStatus === 'ACTIVE') bump(c.agreementActivatedAt || c.agreementSignedAt || c.createdAt, 'active');
+      if (c.agreementStatus === 'EXPIRED') bump(c.agreementEnd, 'expired');
+      if (['DRAFT', 'SENT'].includes(c.agreementStatus)) bump(c.createdAt, 'pending');
+    });
+    return Object.entries(months).sort((a, b) => a[1].at - b[1].at);
+  }, [clients]);
 
   function payload(status) {
     return {
@@ -100,20 +150,28 @@ export default function Requirements() {
       salary: form.salaryMin && form.salaryMax ? `₹${form.salaryMin}L - ₹${form.salaryMax}L` : '—',
       bdeId: internal ? '' : form.bdeId,
       description: form.jobDescription,
+      postingSources: form.postingSources.join(', '),
     };
   }
 
-  async function save(status) {
+  async function save(mode) {
     setError('');
     try {
-      await api.post('/requirements', payload(status));
+      await api.post('/requirements', payload(mode === 'draft' ? 'DRAFT' : 'OPEN'));
     } catch (err) {
       return setError(err.response?.data?.error || 'Could not save this requirement');
     }
     setForm(EMPTY);
     setShowForm(false);
+    setPreview(false);
     load();
   }
+
+  const togglePostingSource = (name) => set({
+    postingSources: form.postingSources.includes(name)
+      ? form.postingSources.filter((s) => s !== name)
+      : [...form.postingSources, name],
+  });
 
   return (
     <div>
@@ -122,15 +180,180 @@ export default function Requirements() {
           <h1>Jobs / Requirements</h1>
           <div className="page-sub">{requirements.length} requirements</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : 'Add Requirement'}
+        <button className="btn btn-primary" onClick={() => { setForm(EMPTY); setError(''); setShowForm(true); }}>
+          Add Requirement
         </button>
       </div>
 
-      {showForm && (
-        <form className="card section" onSubmit={(e) => { e.preventDefault(); save('OPEN'); }}>
-          <h3>A. Basic Information</h3>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <div className={`tab${view === 'all' ? ' active' : ''}`} onClick={() => setView('all')}>All Requirements</div>
+        <div className={`tab${view === 'open' ? ' active' : ''}`} onClick={() => setView('open')}>Open Requirements</div>
+        <div className={`tab${view === 'agreements' ? ' active' : ''}`} onClick={() => setView('agreements')}>Agreement Report</div>
+      </div>
+
+      {view === 'all' && (
+        <>
+          <div className="filter-row">
+            <input type="text" placeholder="Search title or skill…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
+              <option value="">All clients</option>
+              {clients.map((c) => <option key={c.id}>{c.name}</option>)}
+              <option>TeamLink Internal</option>
+            </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">All statuses</option>
+              <option>Open</option>
+              <option>On Hold</option>
+              <option>Closed</option>
+            </select>
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requirement</th><th>Client</th><th>Location</th><th>Experience</th>
+                  <th>Priority</th><th>Openings</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="row-link" onClick={() => navigate(`/requirements/${r.id}`)}>
+                    <td>{r.title}</td>
+                    <td>{clientNameOf(r)}</td>
+                    <td>{r.location || '—'}</td>
+                    <td>{r.experience || '—'}</td>
+                    <td><span className={`status ${priorityBadgeClass(r.priority)}`}>{r.priority}</span></td>
+                    <td>{r.openings}</td>
+                    <td><span className="status active">{requirementStatusLabel(r.status)}</span></td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><td colSpan="7" className="small-muted" style={{ padding: 16 }}>No requirements match.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view === 'open' && (
+        <>
+          <div className="filter-row">
+            <select value={openFilters.dept} onChange={(e) => setOpenFilter({ dept: e.target.value })}>
+              <option value="">All departments</option>
+              {DEPTS.map((d) => <option key={d}>{d}</option>)}
+            </select>
+            <select value={openFilters.client} onChange={(e) => setOpenFilter({ client: e.target.value })}>
+              <option value="">All clients</option>
+              {usedClientNames.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <select value={openFilters.recruiter} onChange={(e) => setOpenFilter({ recruiter: e.target.value })}>
+              <option value="">All recruiters</option>
+              {recruiters.map((r) => <option key={r.id}>{r.name}</option>)}
+            </select>
+            <select value={openFilters.priority} onChange={(e) => setOpenFilter({ priority: e.target.value })}>
+              <option value="">All priorities</option>
+              {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+            </select>
+            <span className="cell-muted" style={{ alignSelf: 'center', fontSize: 12 }}>
+              {openRows.length} open requirement(s)
+            </span>
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Requirement ID</th><th>Job Title</th><th>Client / Internal</th><th>Department</th><th>Location</th>
+                  <th>Openings</th><th>Filled</th><th>Remaining</th><th>Matching</th><th>Recruiter</th><th>TL</th><th>BDE</th>
+                  <th>Priority</th><th>Created</th><th>Closing</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {openRows.map((r) => (
+                  <tr key={r.id} className="row-link" onClick={() => navigate(`/requirements/${r.id}`)}>
+                    <td><b>{r.id}</b></td>
+                    <td>{r.title}</td>
+                    <td className="cell-muted">{clientNameOf(r)}</td>
+                    <td className="cell-muted">{r.department || '—'}</td>
+                    <td className="cell-muted">{r.location || '—'}</td>
+                    <td className="cell-muted">{r.openings || 1}</td>
+                    <td className="cell-muted">{r.filled ?? 0}</td>
+                    <td><b>{r.remaining ?? r.openings}</b></td>
+                    <td onClick={(e) => { e.stopPropagation(); navigate(`/requirements/${r.id}`); }}>
+                      <span className="link-btn">{r.matchingCandidates ?? 0}</span>
+                    </td>
+                    <td className="cell-muted">{r.recruiter?.name || '—'}</td>
+                    <td className="cell-muted">{r.tl || '—'}</td>
+                    <td className="cell-muted">{r.bde?.name || '—'}</td>
+                    <td className="cell-muted">{r.priority || '—'}</td>
+                    <td className="cell-muted">{r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                    <td className="cell-muted">{r.closingDate || '—'}</td>
+                    <td><span className="status active">{requirementStatusLabel(r.status)}</span></td>
+                  </tr>
+                ))}
+                {openRows.length === 0 && (
+                  <tr><td colSpan="16" className="small-muted" style={{ padding: 16 }}>No open requirements in your scope.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view === 'agreements' && (
+        agreementMonths.length === 0
+          ? <div className="empty-mini">No agreement activity recorded yet.</div>
+          : (
+            <>
+              <div className="tbl-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Month</th><th>Agreements Created</th><th>Signed</th><th>Active</th><th>Expired</th><th>Pending</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {agreementMonths.map(([key, m]) => (
+                      <tr key={key}>
+                        <td><b>{key}</b></td>
+                        <td>{m.created}</td>
+                        <td className="cell-muted">{m.signed}</td>
+                        <td className="cell-muted">{m.active}</td>
+                        <td className="cell-muted">{m.expired}</td>
+                        <td className="cell-muted">{m.pending}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+                Computed from each client&apos;s agreement history — months with no activity are not shown.
+              </div>
+            </>
+          )
+      )}
+
+      {showForm && !preview && (
+        <Modal
+          title="Create Requirement"
+          size="xwide"
+          onClose={() => setShowForm(false)}
+          footer={(
+            <>
+              <button className="btn" onClick={() => setShowForm(false)}>Cancel</button>
+              <button className="btn" onClick={() => setPreview(true)}>Preview</button>
+              <button className="btn" onClick={() => save('draft')}>Save Draft</button>
+              <button className="btn" onClick={() => save('activate')}>Save &amp; Activate</button>
+              <button className="btn btn-primary" onClick={() => save('post')}>Save &amp; Post</button>
+            </>
+          )}
+        >
+          <SectionHead first>A. Basic Information</SectionHead>
           <div className="grid-2">
+            <label className="field">
+              <span>Requirement ID</span>
+              <input disabled value="Assigned automatically on save" />
+            </label>
             <label className="field">
               <span>Requirement Type *</span>
               <select value={form.type} onChange={(e) => set({ type: e.target.value })}>
@@ -139,7 +362,7 @@ export default function Requirements() {
             </label>
             <label className="field">
               <span>Job Title *</span>
-              <input required value={form.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Senior Java Developer" />
+              <input value={form.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Senior Java Developer" />
             </label>
             <label className="field">
               <span>Department *</span>
@@ -158,6 +381,10 @@ export default function Requirements() {
               </select>
             </label>
             <label className="field">
+              <span>Requirement Status</span>
+              <input disabled value="Draft (until activated)" />
+            </label>
+            <label className="field">
               <span>Closing Date</span>
               <input type="date" value={form.closingDate} onChange={(e) => set({ closingDate: e.target.value })} />
             </label>
@@ -165,30 +392,47 @@ export default function Requirements() {
 
           {!internal && (
             <>
-              <h3>B. Client Information</h3>
+              <SectionHead>B. Client Information</SectionHead>
               <div className="grid-2">
                 <label className="field">
                   <span>Client *</span>
-                  <select required value={form.clientId} onChange={(e) => set({ clientId: e.target.value })}>
-                    <option value="">Select client</option>
+                  <select value={form.clientId} onChange={(e) => set({ clientId: e.target.value })}>
+                    <option value="">— Select —</option>
                     {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                </label>
+                <label className="field">
+                  <span>Agreement</span>
+                  <input disabled value={selectedClient?.agreementId || (selectedClient ? 'Not raised yet' : '')} />
                 </label>
                 <label className="field">
                   <span>Agreement Status</span>
                   <input disabled value={selectedClient ? agreementStatusLabel(selectedClient.agreementStatus) : ''} />
                 </label>
+                <label className="field">
+                  <span>Client Contact</span>
+                  <input
+                    disabled
+                    value={selectedClient
+                      ? [selectedClient.contactName, selectedClient.contactPhone].filter(Boolean).join(' · ') || '—'
+                      : ''}
+                  />
+                </label>
               </div>
-              {selectedClient && selectedClient.agreementStatus !== 'ACTIVE' && (
-                <div className="error-text">
-                  Agreement is {agreementStatusLabel(selectedClient.agreementStatus)}. You can save this requirement as Draft, but it
-                  cannot be activated or posted until the agreement is Active.
-                </div>
+              {selectedClient && (
+                selectedClient.agreementStatus === 'ACTIVE'
+                  ? <div className="notice">Agreement is Active — this requirement can be activated and posted.</div>
+                  : (
+                    <div className="notice amber">
+                      Agreement is <b>{agreementStatusLabel(selectedClient.agreementStatus)}</b>. You can save this
+                      requirement as Draft, but it cannot be activated or posted until the agreement is Active.
+                    </div>
+                  )
               )}
             </>
           )}
 
-          <h3>C. Job Description</h3>
+          <SectionHead>C. Job Description</SectionHead>
           <label className="field">
             <span>Full Job Description *</span>
             <textarea rows="3" value={form.jobDescription} onChange={(e) => set({ jobDescription: e.target.value })} />
@@ -218,7 +462,7 @@ export default function Requirements() {
             <input value={form.goodToHaveSkills} placeholder="AWS, Docker" onChange={(e) => set({ goodToHaveSkills: e.target.value })} />
           </label>
 
-          <h3>D. Job Conditions</h3>
+          <SectionHead>D. Job Conditions</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>Employment Type *</span>
@@ -277,7 +521,7 @@ export default function Requirements() {
             </label>
           </div>
 
-          <h3>E. Compensation</h3>
+          <SectionHead>E. Compensation</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>Salary Type</span>
@@ -301,7 +545,7 @@ export default function Requirements() {
             </label>
           </div>
 
-          <h3>F. Assignment</h3>
+          <SectionHead>F. Assignment</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>Recruiter *</span>
@@ -312,11 +556,17 @@ export default function Requirements() {
             </label>
             <label className="field">
               <span>TL</span>
-              <input value={form.tl} onChange={(e) => set({ tl: e.target.value })} />
+              <select value={form.tl} onChange={(e) => set({ tl: e.target.value })}>
+                <option value="">— Not assigned —</option>
+                {tls.map((t) => <option key={t.id}>{t.name}</option>)}
+              </select>
             </label>
             <label className="field">
               <span>STL</span>
-              <input value={form.stl} onChange={(e) => set({ stl: e.target.value })} />
+              <select value={form.stl} onChange={(e) => set({ stl: e.target.value })}>
+                <option value="">— None —</option>
+                {stls.map((t) => <option key={t.id}>{t.name}</option>)}
+              </select>
             </label>
             {!internal && (
               <label className="field">
@@ -329,57 +579,95 @@ export default function Requirements() {
             )}
           </div>
 
-          {error && <div className="error-text">{error}</div>}
-          <div className="qa-row">
-            <button className="btn btn-sm" type="button" onClick={() => save('DRAFT')}>Save Draft</button>
-            <button className="btn btn-primary btn-sm" type="submit">Save &amp; Activate</button>
+          <SectionHead>G. Job Posting</SectionHead>
+          <div className="field">
+            <span>Posting Sources</span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 4 }}>
+              {POSTING_SOURCES.map((name) => (
+                <label key={name} style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 400, fontSize: 12.5 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto' }}
+                    checked={form.postingSources.includes(name)}
+                    onChange={() => togglePostingSource(name)}
+                  />
+                  {name}
+                </label>
+              ))}
+            </div>
           </div>
-        </form>
+          <div className="cell-muted" style={{ fontSize: 11.5 }}>
+            Posting Status, External Job ID and External URL are managed by the existing Job Posting lifecycle
+            (Draft → Ready to Post → Posted / Partially Posted / Failed → Paused → Closed) on the requirement
+            page after saving.
+          </div>
+
+          {error && <div className="error-text">{error}</div>}
+        </Modal>
       )}
 
-      <div className="filter-row">
-        <input
-          type="text"
-          placeholder="Search title or skill…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}>
-          <option value="">All clients</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="">All statuses</option>
-          <option value="DRAFT">Draft</option>
-          <option value="OPEN">Open</option>
-          <option value="CLOSED">Closed</option>
-        </select>
-      </div>
-
-      <div className="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Requirement</th><th>Client</th><th>Location</th><th>Experience</th>
-              <th>Priority</th><th>Openings</th><th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="row-link">
-                <td><Link to={`/requirements/${r.id}`}>{r.title}</Link></td>
-                <td>{r.internal ? 'TeamLink Internal' : r.client?.name}</td>
-                <td>{r.location || '—'}</td>
-                <td>{r.experience || '—'}</td>
-                <td><span className={`status ${priorityClass(r.priority)}`}>{r.priority}</span></td>
-                <td>{r.openings}</td>
-                <td><span className="status">{requirementStatusLabel(r.status)}</span></td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan="7" className="small-muted">No requirements match.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {showForm && preview && (
+        <Modal
+          title={`Preview — ${form.title || '(untitled)'}`}
+          size="xwide"
+          onClose={() => { setPreview(false); setShowForm(false); }}
+          footer={<button className="btn btn-primary" onClick={() => setPreview(false)}>← Back to form</button>}
+        >
+          <div className="section-label">Basic</div>
+          <div className="kv"><span className="k">Type</span><span>{form.type}</span></div>
+          {!internal && (
+            <div className="kv">
+              <span className="k">Client</span>
+              <span>{`${selectedClient?.name || '—'} · Agreement ${selectedClient ? agreementStatusLabel(selectedClient.agreementStatus) : '—'}`}</span>
+            </div>
+          )}
+          <div className="kv"><span className="k">Department</span><span>{form.department}</span></div>
+          <div className="kv"><span className="k">Openings / Priority</span><span>{`${form.openings} · ${form.priority}`}</span></div>
+          <div className="kv"><span className="k">Closing Date</span><span>{form.closingDate || '—'}</span></div>
+          <div className="section-label">Job Description</div>
+          <div className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'pre-line' }}>{form.jobDescription || '—'}</div>
+          {form.responsibilities && (
+            <>
+              <div className="section-label">Responsibilities</div>
+              <div className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'pre-line' }}>{form.responsibilities}</div>
+            </>
+          )}
+          {form.qualifications && (
+            <>
+              <div className="section-label">Qualifications</div>
+              <div className="cell-muted" style={{ fontSize: 12.5, whiteSpace: 'pre-line' }}>{form.qualifications}</div>
+            </>
+          )}
+          <div className="section-label">Skills</div>
+          <div className="kv"><span className="k">Mandatory</span><span>{form.skills || '—'}</span></div>
+          <div className="kv"><span className="k">Good-to-have</span><span>{form.goodToHaveSkills || '—'}</span></div>
+          <div className="section-label">Conditions</div>
+          <div className="kv"><span className="k">Employment / Mode</span><span>{`${form.employmentType} · ${form.workMode}`}</span></div>
+          <div className="kv"><span className="k">Location</span><span>{`${form.location} (preferred: ${form.preferredLocation || 'Any'})`}</span></div>
+          <div className="kv"><span className="k">Experience</span><span>{`${form.expMin}-${form.expMax} yrs (relevant ${form.relevantExperience} yrs)`}</span></div>
+          <div className="kv"><span className="k">Joining / Notice</span><span>{`${form.joiningTimeline} · max ${form.noticePeriodMax}`}</span></div>
+          <div className="kv"><span className="k">Job Preference</span><span>{form.jobPreference}</span></div>
+          <div className="section-label">Compensation</div>
+          <div className="kv">
+            <span className="k">{`${form.salaryType} (${form.currency})`}</span>
+            <span>{form.salaryMin && form.salaryMax ? `₹${form.salaryMin}L - ₹${form.salaryMax}L` : '—'}</span>
+          </div>
+          <div className="section-label">Assignment</div>
+          <div className="kv">
+            <span className="k">{`Recruiter / TL / STL${internal ? '' : ' / BDE'}`}</span>
+            <span>
+              {[
+                recruiters.find((r) => r.id === form.recruiterId)?.name || '—',
+                form.tl || '—',
+                form.stl || '—',
+                ...(internal ? [] : [bdes.find((b) => b.id === form.bdeId)?.name || '—']),
+              ].join(' · ')}
+            </span>
+          </div>
+          <div className="section-label">Posting Sources</div>
+          <div className="kv"><span className="k">Selected</span><span>{form.postingSources.join(', ') || 'None'}</span></div>
+        </Modal>
+      )}
     </div>
   );
 }

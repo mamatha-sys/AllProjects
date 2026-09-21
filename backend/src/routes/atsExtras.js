@@ -11,16 +11,43 @@ const {
 const router = express.Router();
 router.use(requireAuth);
 
-// Recruiter & BDE workload view.
+// Recruiter & BDE workload view — the prototype's teamView() (line 9154):
+// Name / Role / Open Requirements / Active Pipeline, recruiters first, then
+// BDEs, then the TLs who oversee them.
+//
+// "Active pipeline" is every application on that person's requirements that
+// has not yet reached Joined or Rejected. (The prototype hardcodes a BDE's
+// number to the count of applications sitting at "With BDE", and a second
+// BDE's to a literal 0 — computing it the same way for everyone is the fix.)
+const TEAM_ROLE_ORDER = { RECRUITER: 0, BDE: 1, TL: 2, STL: 3 };
+const TEAM_ROLE_LABELS = { RECRUITER: 'Recruiter', BDE: 'BDE', TL: 'TL', STL: 'STL' };
+const CLOSED_PIPELINE_STAGES = ['JOINED', 'HIRED', 'REJECTED'];
+
 router.get('/team', async (req, res) => {
-  const recruiters = await prisma.user.findMany({ where: { role: { in: ['RECRUITER', 'BDE'] } } });
+  const people = await prisma.user.findMany({
+    where: { role: { in: ['RECRUITER', 'BDE', 'TL', 'STL'] } },
+  });
   const rows = await Promise.all(
-    recruiters.map(async (u) => {
-      const openAsRecruiter = await prisma.requirement.count({ where: { recruiterId: u.id, status: 'OPEN' } });
-      const openAsBde = await prisma.requirement.count({ where: { bdeId: u.id, status: 'OPEN' } });
-      return { id: u.id, name: u.name, role: u.role, openRequirements: openAsRecruiter + openAsBde };
+    people.map(async (u) => {
+      const ownRequirements = { OR: [{ recruiterId: u.id }, { bdeId: u.id }] };
+      const [openRequirements, activePipeline] = await Promise.all([
+        prisma.requirement.count({ where: { ...ownRequirements, status: 'OPEN' } }),
+        prisma.application.count({
+          where: { requirement: ownRequirements, stage: { notIn: CLOSED_PIPELINE_STAGES } },
+        }),
+      ]);
+      return {
+        id: u.id,
+        name: u.name,
+        role: u.role,
+        roleLabel: TEAM_ROLE_LABELS[u.role] || u.role,
+        oversight: ['TL', 'STL'].includes(u.role),
+        openRequirements,
+        activePipeline,
+      };
     })
   );
+  rows.sort((a, b) => (TEAM_ROLE_ORDER[a.role] - TEAM_ROLE_ORDER[b.role]) || a.name.localeCompare(b.name));
   res.json(rows);
 });
 

@@ -198,3 +198,74 @@ export const INVOICE_TRIGGERS = ['Candidate Joining', 'Custom'];
 export const AGREEMENT_TEMPLATES = ['Standard Recruitment / Staffing', 'Contract Staffing', 'Executive Search'];
 export const RISK_FLAGS = ['None', 'Watch', 'High Risk'];
 export const INDIAN_STATES = ['Telangana', 'Karnataka', 'Maharashtra', 'Tamil Nadu', 'Delhi'];
+
+// The prototype's POSTING_SOURCES (line 8720) — the checkboxes in section
+// "G. Job Posting" of the Create Requirement form.
+export const POSTING_SOURCES = [
+  'TeamLink Job Portal', 'Naukri', 'Indeed', 'Shine', 'TeamLink Website', 'Social Media',
+];
+
+// Badge classes the prototype uses for these two columns. Its own priority
+// ternary leaves Urgent looking like Low; Urgent is shown as High here.
+export function priorityBadgeClass(priority) {
+  if (priority === 'High' || priority === 'Urgent') return 'rejected';
+  if (priority === 'Medium') return 'review';
+  return 'applied';
+}
+// agreementBadgeClass() (line 6294).
+export function agreementBadgeClass(code) {
+  const label = AGREEMENT_STATUS_LABELS[code] || code;
+  if (label === 'Active') return 'active';
+  if (label === 'Cancelled' || label === 'Expired') return 'rejected';
+  return 'pending';
+}
+
+// The prototype's statusBadge() (line 6164) — the pill colour per pipeline
+// stage. Its map has no entry for the AI-interview stages, so those fall
+// through to 'new' exactly as they do there.
+const STAGE_BADGE_CLASSES = {
+  NEW: 'new',
+  RECRUITER_REVIEW: 'review',
+  RECRUITER_APPROVED: 'approved',
+  WITH_BDE: 'review',
+  BDE_APPROVED: 'approved',
+  SHARED_WITH_CLIENT: 'review',
+  CLIENT_REVIEW: 'review',
+  CLIENT_SHORTLISTED: 'shortlist',
+  INTERVIEW_SCHEDULED: 'interview',
+  INTERVIEW_COMPLETED: 'interview',
+  SELECTED: 'selected',
+  OFFER: 'offer',
+  OFFER_ACCEPTED: 'offer',
+  JOINED: 'joined',
+  HIRED: 'joined',
+  REJECTED: 'rejected',
+  HOLD: 'hold',
+};
+export function stageBadgeClass(code) {
+  return STAGE_BADGE_CLASSES[code] || 'new';
+}
+// The Status column: Active / On Hold / Rejected / Closed.
+export function lifeStatusClass(status) {
+  if (status === 'Active') return 'active';
+  if (status === 'On Hold') return 'pending';
+  if (status === 'Rejected') return 'rejected';
+  return 'review';
+}
+// The AI Interview column.
+export function aiStatusClass(status) {
+  if (status === 'Completed') return 'active';
+  if (status === 'Expired') return 'rejected';
+  return 'pending';
+}
+// The prototype renders dates as "20 Sept 2026".
+export function protoDate(value) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+export function initials(name) {
+  if (!name) return '?';
+  return name.replace(/\(.*\)/, '').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+}

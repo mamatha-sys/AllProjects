@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import api from '../api';
+import Modal, { SectionHead } from '../components/Modal.jsx';
 import {
   ALL_STAGE_CODES, stageLabel, LIFE_STATUSES, DEPTS, LOCS,
   CANDIDATE_SOURCES, CANDIDATE_FIRST_SOURCES, CANDIDATE_FILTER_SOURCES, APPLICATION_METHODS,
   CANDIDATE_GENDERS, CANDIDATE_NOTICE_PERIODS, CANDIDATE_AVAILABILITY, CANDIDATE_JOB_PREFERENCES,
   CANDIDATE_EMPLOYMENT_TYPES, CANDIDATE_WORK_MODES, CANDIDATE_EDUCATION,
+  stageBadgeClass, lifeStatusClass, aiStatusClass, protoDate, initials,
 } from '../atsVocab';
 
 // The prototype's Add Candidate modal (openAddCandidateModal, line 8150),
@@ -29,22 +31,19 @@ const EMPTY_FILTERS = {
   tl: '', bde: '', location: '', source: '', stage: '', status: '', appliedOn: '',
 };
 
-function lifeClass(status) {
-  if (status === 'Active') return 'priority-low';
-  if (status === 'Rejected') return 'priority-high';
-  if (status === 'On Hold') return 'priority-medium';
-  return '';
-}
-
 export default function Candidates() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [candidates, setCandidates] = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [team, setTeam] = useState([]);
   const [form, setForm] = useState(EMPTY);
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS, stage: searchParams.get('stage') || '' });
   const [showForm, setShowForm] = useState(false);
   const [duplicate, setDuplicate] = useState('');
   const [error, setError] = useState('');
+  // The prototype's three tabs: Pipeline / Rejected (n) / Source Analytics.
+  const [view, setView] = useState('pipeline');
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const setFilter = (patch) => setFilters((f) => ({ ...f, ...patch }));
@@ -122,6 +121,45 @@ export default function Candidates() {
 
   const tlNames = [...new Set(requirements.map((r) => r.tl).filter(Boolean))];
 
+  // Rejected view — the prototype's rejectedListHtml(). A rejection closes one
+  // application; the Candidate Master record is never deleted.
+  const rejectedRows = useMemo(() => {
+    const out = [];
+    candidates.forEach((c) => (c.applications || []).forEach((a) => {
+      if (a.stage === 'REJECTED') out.push({ candidate: c, application: a });
+    }));
+    return out;
+  }, [candidates]);
+
+  // Source analytics — the prototype's sourceAnalyticsHtml(), computed live
+  // from the candidate and application records.
+  const sourceStats = useMemo(() => {
+    const by = {};
+    const bucket = (k) => {
+      by[k] = by[k] || { first: 0, latest: 0, apps: 0, auto: 0, manual: 0 };
+      return by[k];
+    };
+    let autoTotal = 0;
+    candidates.forEach((c) => {
+      const first = c.firstSource || c.source || 'Unknown';
+      const latest = c.source || first;
+      bucket(first).first += 1;
+      bucket(latest).latest += 1;
+      (c.applications || []).forEach((a) => {
+        const src = a.source || c.source || 'Unknown';
+        const b = bucket(src);
+        b.apps += 1;
+        if ((a.applicationMethod || 'Manual') === 'Auto-Apply') { b.auto += 1; autoTotal += 1; } else b.manual += 1;
+      });
+    });
+    const totalApps = candidates.reduce((n, c) => n + (c.applications || []).length, 0);
+    return {
+      rows: Object.entries(by).sort((a, b) => b[1].latest - a[1].latest),
+      autoTotal,
+      manualTotal: totalApps - autoTotal,
+    };
+  }, [candidates]);
+
   return (
     <div>
       <div className="page-head">
@@ -129,14 +167,23 @@ export default function Candidates() {
           <h1>Candidates &amp; Pipeline</h1>
           <div className="page-sub">{candidates.length} candidates in the database</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : 'Add Candidate'}
-        </button>
+        <button className="btn btn-primary" onClick={() => { setError(''); setShowForm(true); }}>Add Candidate</button>
       </div>
 
       {showForm && (
-        <form className="card section" onSubmit={createCandidate}>
-          <h3>A. Personal</h3>
+        <Modal
+          title="Add Candidate"
+          size="xwide"
+          onClose={() => setShowForm(false)}
+          footer={(
+            <>
+              <button className="btn" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+              <button className="btn btn-primary" type="submit" form="addCandidateForm">Save Candidate</button>
+            </>
+          )}
+        >
+        <form id="addCandidateForm" onSubmit={createCandidate}>
+          <SectionHead first caps>A. Personal</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>First Name *</span>
@@ -179,7 +226,7 @@ export default function Candidates() {
             </label>
           </div>
 
-          <h3>B. Professional</h3>
+          <SectionHead caps>B. Professional</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>Current Company</span>
@@ -237,7 +284,7 @@ export default function Candidates() {
             </label>
           </div>
 
-          <h3>C. Education</h3>
+          <SectionHead caps>C. Education</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>Highest Qualification</span>
@@ -259,7 +306,7 @@ export default function Candidates() {
             </label>
           </div>
 
-          <h3>D. Skills</h3>
+          <SectionHead caps>D. Skills</SectionHead>
           <label className="field">
             <span>Mandatory Skills * (comma separated)</span>
             <input required placeholder="Java, Spring Boot, SQL" value={form.skills} onChange={(e) => set({ skills: e.target.value })} />
@@ -279,13 +326,26 @@ export default function Candidates() {
             <input placeholder="Communication, Stakeholder management" value={form.softSkills} onChange={(e) => set({ softSkills: e.target.value })} />
           </label>
 
-          <h3>E. Resume</h3>
-          <label className="field">
-            <span>Resume Name</span>
-            <input placeholder="No file chosen" value={form.resumeName} onChange={(e) => set({ resumeName: e.target.value })} />
-          </label>
+          <SectionHead caps>E. Resume</SectionHead>
+          <div className="grid-2">
+            <label className="field">
+              <span>Upload Resume</span>
+              <input
+                type="file"
+                onChange={(e) => set({ resumeName: e.target.files?.[0]?.name || '' })}
+              />
+            </label>
+            <label className="field">
+              <span>Resume Name</span>
+              <input readOnly placeholder="No file chosen" value={form.resumeName} />
+            </label>
+          </div>
+          <div className="cell-muted" style={{ fontSize: 12 }}>
+            Resume Score and AI-parsed fields appear only after a resume is attached — no score is shown for a
+            candidate without one.
+          </div>
 
-          <h3>F. Source</h3>
+          <SectionHead caps>F. Source</SectionHead>
           <div className="grid-2">
             <label className="field">
               <span>Source</span>
@@ -312,21 +372,42 @@ export default function Candidates() {
             </label>
           </div>
 
-          <h3>G. Requirement</h3>
-          <label className="field">
-            <span>Apply to Requirement</span>
-            <select value={form.requirementId} onChange={(e) => set({ requirementId: e.target.value })}>
-              <option value="">None — add to database only</option>
-              {requirements.filter((r) => r.status !== 'CLOSED').map((r) => (
-                <option key={r.id} value={r.id}>{r.title} — {r.internal ? 'TeamLink Internal' : r.client?.name}</option>
-              ))}
-            </select>
-          </label>
+          <SectionHead caps>G. Requirement</SectionHead>
+          <div className="grid-2">
+            <label className="field">
+              <span>Apply to Requirement</span>
+              <select value={form.requirementId} onChange={(e) => set({ requirementId: e.target.value })}>
+                <option value="">None — add to database only</option>
+                {requirements.filter((r) => r.status !== 'CLOSED').map((r) => (
+                  <option key={r.id} value={r.id}>{r.title} — {r.internal ? 'TeamLink Internal' : r.client?.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Requirement ID / Client</span>
+              <input
+                readOnly
+                placeholder="—"
+                value={(() => {
+                  const r = requirements.find((x) => x.id === form.requirementId);
+                  return r ? `${r.title} · ${r.internal ? 'TeamLink Internal' : r.client?.name || '—'}` : '';
+                })()}
+              />
+            </label>
+          </div>
+          <div className="cell-muted" style={{ fontSize: 12 }}>
+            AI Match Score is calculated against the selected requirement once mandatory skills and experience
+            are filled in. AI Interview status starts as <b>Required</b>.
+          </div>
 
-          {duplicate && <div className="error-text">{duplicate}</div>}
+          {/* The prototype writes its duplicate warning into an element its own
+              modal never renders, and its Save path bypasses the check entirely.
+              Here the warning is shown where it is raised, and the API blocks
+              the save until it is acknowledged. */}
+          {duplicate && <div className="notice amber" style={{ marginTop: 12 }}>{duplicate}</div>}
           {error && <div className="error-text">{error}</div>}
-          <button className="btn btn-primary btn-sm" type="submit">Save Candidate</button>
         </form>
+        </Modal>
       )}
 
       <div className="filter-row">
@@ -375,38 +456,151 @@ export default function Candidates() {
         <button className="btn btn-sm" onClick={() => setFilters(EMPTY_FILTERS)}>Clear</button>
       </div>
 
-      <div className="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Candidate</th><th>ID</th><th>Current Stage</th><th>Owner</th><th>Next Action</th>
-              <th>Due Date</th><th>Match Score</th><th>Status</th><th>AI Interview</th><th>Follow-up</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} className="row-link">
-                <td><Link to={`/candidates/${c.id}`}>{c.name}</Link></td>
-                <td>{c.id}</td>
-                <td>{c.currentStage ? <span className="status">{c.currentStageLabel}</span> : <span className="small-muted">No application</span>}</td>
-                <td>{c.owner || '—'}</td>
-                <td>{c.nextAction || '—'}</td>
-                <td>
-                  {c.dueDate || '—'}
-                  {c.overdue && <span className="status priority-high"> Overdue</span>}
-                </td>
-                <td>{c.matchScore != null ? `${c.matchScore}%` : '—'}</td>
-                <td>{c.lifeStatus ? <span className={`status ${lifeClass(c.lifeStatus)}`}>{c.lifeStatus}</span> : '—'}</td>
-                <td>{c.currentStage ? <span className="status">{c.aiInterviewStatus}</span> : '—'}</td>
-                {/* Follow-up logging is not implemented yet — the column is the
-                    prototype's, the action behind it is still to come. */}
-                <td className="small-muted">—</td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan="10" className="small-muted">No candidates match.</td></tr>}
-          </tbody>
-        </table>
+      <div className="tabs" style={{ marginBottom: 12 }}>
+        <div className={`tab${view === 'pipeline' ? ' active' : ''}`} onClick={() => setView('pipeline')}>Pipeline</div>
+        <div className={`tab${view === 'rejected' ? ' active' : ''}`} onClick={() => setView('rejected')}>
+          {`Rejected (${rejectedRows.length})`}
+        </div>
+        <div className={`tab${view === 'sources' ? ' active' : ''}`} onClick={() => setView('sources')}>Source Analytics</div>
       </div>
+
+      {view === 'pipeline' && (
+        <div className="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Candidate</th><th>ID</th><th>Current Stage</th><th>Owner</th><th>Next Action</th>
+                <th>Due Date</th><th>Match Score</th><th>Status</th><th>AI Interview</th><th>Follow-up</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.id} className="row-link" onClick={() => navigate(`/candidates/${c.id}`)}>
+                  <td><span className="avatarsm">{initials(c.name)}</span>{c.name}</td>
+                  <td>{c.id}</td>
+                  <td>
+                    {c.currentStage
+                      ? <span className={`status ${stageBadgeClass(c.currentStage)}`}>{c.currentStageLabel}</span>
+                      : <span className="small-muted">No application</span>}
+                  </td>
+                  <td className="cell-muted">{c.owner || '—'}</td>
+                  <td className="cell-muted">{c.nextAction || '—'}</td>
+                  <td className="cell-muted">
+                    {protoDate(c.dueDate)}
+                    {c.overdue && <> <span className="status rejected">Overdue</span></>}
+                  </td>
+                  <td>{c.matchScore != null ? `${c.matchScore}%` : '—'}</td>
+                  <td>
+                    {c.lifeStatus
+                      ? <span className={`status ${lifeStatusClass(c.lifeStatus)}`}>{c.lifeStatus}</span>
+                      : <span className="cell-muted">—</span>}
+                  </td>
+                  <td>
+                    {c.currentStage
+                      ? <span className={`status ${aiStatusClass(c.aiInterviewStatus)}`}>{c.aiInterviewStatus}</span>
+                      : <span className="cell-muted">—</span>}
+                  </td>
+                  {/* Follow-up logging is not implemented yet — the column is the
+                      prototype's, the action behind it is still to come. */}
+                  <td className="cell-muted">—</td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan="10" className="small-muted" style={{ padding: 16 }}>No candidates match.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {view === 'rejected' && (
+        <>
+          <div className="cell-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            Rejected candidates stay in the Candidate Master and remain searchable and matchable for other
+            requirements. Internal rejection reasoning is never shown to client users.
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Candidate</th><th>Candidate ID</th><th>Requirement</th><th>Client</th><th>Previous Stage</th>
+                  <th>Rejected By</th><th>Rejected Side</th><th>Reason</th><th>Detailed Reason</th>
+                  <th>Rejected Date</th><th>Recruiter</th><th>BDE</th><th>TL</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rejectedRows.map(({ candidate: c, application: a }) => (
+                  <tr key={a.id}>
+                    <td>{c.name}</td>
+                    <td className="cell-muted">{c.id}</td>
+                    <td>{a.requirement?.title || '—'}</td>
+                    <td className="cell-muted">{a.requirement?.internal ? 'TeamLink Internal' : a.requirement?.client?.name || '—'}</td>
+                    <td className="cell-muted">—</td>
+                    <td className="cell-muted">—</td>
+                    <td className="cell-muted">—</td>
+                    <td className="cell-muted">—</td>
+                    <td>—</td>
+                    <td className="cell-muted">{protoDate(a.updatedAt)}</td>
+                    <td className="cell-muted">{a.requirement?.recruiter?.name || '—'}</td>
+                    <td className="cell-muted">{a.requirement?.bde?.name || '—'}</td>
+                    <td className="cell-muted">{a.requirement?.tl || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <Link className="btn btn-sm" to={`/candidates/${c.id}`}>View Profile</Link>
+                    </td>
+                  </tr>
+                ))}
+                {rejectedRows.length === 0 && (
+                  <tr><td colSpan="14" className="small-muted" style={{ padding: 16 }}>No rejected candidates in your scope.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {view === 'sources' && (
+        <>
+          <div className="section-label">Auto-apply</div>
+          <div className="cell-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            {'Total auto-apply: '}<b>{sourceStats.autoTotal}</b>
+            {' · Manual applications: '}<b>{sourceStats.manualTotal}</b>
+          </div>
+          <div className="section-label">Source-wise candidates</div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th><th>Candidates (latest source)</th><th>Candidates (first source)</th>
+                  <th>Applications</th><th>Auto-apply</th><th>Manual</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceStats.rows.map(([name, s]) => (
+                  <tr
+                    key={name}
+                    className="row-link"
+                    onClick={() => { setView('pipeline'); setFilter({ source: name }); }}
+                  >
+                    <td><b>{name}</b></td>
+                    <td>{s.latest}</td>
+                    <td className="cell-muted">{s.first}</td>
+                    <td className="cell-muted">{s.apps}</td>
+                    <td className="cell-muted">{s.auto}</td>
+                    <td className="cell-muted">{s.manual}</td>
+                  </tr>
+                ))}
+                {sourceStats.rows.length === 0 && (
+                  <tr><td colSpan="6" className="small-muted" style={{ padding: 16 }}>No source data yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="cell-muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+            Counts are computed live from the candidate and application records — a candidate arriving from a
+            second source updates their latest source, it never creates a duplicate master record.
+          </div>
+        </>
+      )}
     </div>
   );
 }

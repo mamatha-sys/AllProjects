@@ -18,6 +18,25 @@ router.get('/', async (req, res) => {
   res.json(clients);
 });
 
+// Live "Agreement Template Preview" pane in the Add Client modal (the
+// prototype's refreshAgreementPreview, line 7428). Nothing is stored — this
+// renders the same template the real document is built from, so the two can
+// never drift.
+router.get('/agreement-preview', (req, res) => {
+  const fee = Number(req.query.feePercent);
+  res.json({
+    document: buildAgreementDocument({
+      name: (req.query.name || '').trim() || '(company name)',
+      location: req.query.location || null,
+      agreementFeePercent: Number.isFinite(fee) && fee > 0 ? fee : 8.33,
+      gst: req.query.gst || null,
+      tdsPercent: req.query.tdsPercent != null ? Number(req.query.tdsPercent) : undefined,
+      paymentTerms: req.query.paymentTerms || undefined,
+      guaranteePeriod: req.query.guaranteePeriod || undefined,
+    }),
+  });
+});
+
 router.get('/:id', async (req, res) => {
   const client = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!client) return res.status(404).json({ error: 'Client not found' });

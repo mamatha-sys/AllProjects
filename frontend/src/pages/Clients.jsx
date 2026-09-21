@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
+import Modal from '../components/Modal.jsx';
 import {
-  agreementStatusLabel, DEPTS, LOCS, INDIAN_STATES, CLIENT_INDUSTRIES, CLIENT_STATUSES,
+  agreementStatusLabel, agreementBadgeClass, DEPTS, LOCS, INDIAN_STATES, CLIENT_INDUSTRIES, CLIENT_STATUSES,
   CLIENT_TYPES, CLIENT_PRIORITIES, COMM_MODES, BUSINESS_TYPES, PAYMENT_TERMS,
   INVOICE_TRIGGERS, AGREEMENT_TEMPLATES, RISK_FLAGS,
 } from '../atsVocab';
@@ -44,14 +45,36 @@ const EMPTY = {
 };
 
 export default function Clients() {
+  const navigate = useNavigate();
   const [clients, setClients] = useState([]);
   const [requirements, setRequirements] = useState([]);
   const [form, setForm] = useState(EMPTY);
   const [tab, setTab] = useState('basic');
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState('');
+  const [agreementPreview, setAgreementPreview] = useState('');
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
+
+  // The preview pane refreshes from the fields that actually drive the
+  // document, debounced so typing a company name does not spam the API.
+  useEffect(() => {
+    if (!showForm) return undefined;
+    const t = setTimeout(() => {
+      api.get('/clients/agreement-preview', {
+        params: {
+          name: form.name,
+          location: form.location,
+          feePercent: form.agreementFeePercent,
+          gst: form.gst,
+          tdsPercent: form.tdsPercent,
+          paymentTerms: form.paymentTerms,
+          guaranteePeriod: form.guaranteePeriod,
+        },
+      }).then((res) => setAgreementPreview(res.data.document)).catch(() => setAgreementPreview(''));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [showForm, form.name, form.location, form.agreementFeePercent, form.gst, form.tdsPercent, form.paymentTerms, form.guaranteePeriod]);
 
   function load() {
     api.get('/clients').then((res) => setClients(res.data));
@@ -84,23 +107,27 @@ export default function Clients() {
           <h1>Clients</h1>
           <div className="page-sub">{clients.length} client accounts</div>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : 'Add Client'}
-        </button>
+        <button className="btn btn-primary" onClick={() => { setError(''); setShowForm(true); }}>Add Client</button>
       </div>
 
       {showForm && (
-        <form className="card section" onSubmit={(e) => { e.preventDefault(); save(true); }}>
-          <div className="tabbar">
+      <Modal
+        title="Add Client"
+        size="xwide"
+        onClose={() => setShowForm(false)}
+        bodyStyle={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}
+        footer={(
+          <>
+            <button className="btn" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+            <button className="btn" type="button" onClick={() => save(false)}>Save</button>
+            <button className="btn btn-primary" type="submit" form="addClientForm">Save &amp; Create Agreement</button>
+          </>
+        )}
+      >
+        <form id="addClientForm" style={{ flex: 1, minWidth: 320 }} onSubmit={(e) => { e.preventDefault(); save(true); }}>
+          <div className="tabs" style={{ marginBottom: 12 }}>
             {TABS.map(([key, label]) => (
-              <button
-                type="button"
-                key={key}
-                className={`tab-btn ${tab === key ? 'active' : ''}`}
-                onClick={() => setTab(key)}
-              >
-                {label}
-              </button>
+              <div key={key} className={`tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>{label}</div>
             ))}
           </div>
 
@@ -396,11 +423,32 @@ export default function Clients() {
           )}
 
           {error && <div className="error-text">{error}</div>}
-          <div className="qa-row">
-            <button className="btn btn-sm" type="button" onClick={() => save(false)}>Save</button>
-            <button className="btn btn-primary btn-sm" type="submit">Save &amp; Create Agreement</button>
-          </div>
         </form>
+
+        {/* The prototype's live "Agreement Template Preview" pane — the same
+            master template, filled with this client's values as they are typed. */}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 320,
+            background: 'var(--paper)',
+            border: '1px solid var(--line)',
+            borderRadius: 8,
+            padding: 14,
+            maxHeight: 520,
+            overflowY: 'auto',
+          }}
+        >
+          <h4 style={{ fontSize: 13, marginBottom: 4 }}>Agreement Template Preview</h4>
+          <div className="small-muted" style={{ fontSize: 11, marginBottom: 10 }}>
+            Updates live from the fields on the left — same master template used everywhere, just filled with
+            this client&apos;s values.
+          </div>
+          <div className="small-muted" style={{ whiteSpace: 'pre-line', fontSize: 10.5, lineHeight: 1.5 }}>
+            {agreementPreview || 'Enter a company name to see the agreement.'}
+          </div>
+        </div>
+      </Modal>
       )}
 
       <div className="tbl-wrap">
@@ -413,16 +461,18 @@ export default function Clients() {
           </thead>
           <tbody>
             {clients.map((c) => (
-              <tr key={c.id} className="row-link">
-                <td><Link to={`/clients/${c.id}`}>{c.name}</Link></td>
+              <tr key={c.id} className="row-link" onClick={() => navigate(`/clients/${c.id}`)}>
+                <td>{c.name}</td>
                 <td>{c.industry || '—'}</td>
                 <td>{c.location || '—'}</td>
                 <td>{c.accountManager || '—'}</td>
-                <td><span className="status">{agreementStatusLabel(c.agreementStatus)}</span></td>
+                <td><span className={`status ${agreementBadgeClass(c.agreementStatus)}`}>{agreementStatusLabel(c.agreementStatus)}</span></td>
                 <td>{openCount(c.id)}</td>
               </tr>
             ))}
-            {clients.length === 0 && <tr><td colSpan="6" className="small-muted">No clients in your scope.</td></tr>}
+            {clients.length === 0 && (
+              <tr><td colSpan="6" className="small-muted" style={{ padding: 16 }}>No clients in your scope.</td></tr>
+            )}
           </tbody>
         </table>
       </div>

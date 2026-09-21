@@ -24,10 +24,24 @@ router.get('/', async (req, res) => {
   const where = await scopedWhere(req.user);
   if (req.query.status) where.status = req.query.status;
   if (req.query.clientId) where.clientId = req.query.clientId;
-  const requirements = await prisma.requirement.findMany({
+  const found = await prisma.requirement.findMany({
     where,
-    include: { client: true, recruiter: true, bde: true, _count: { select: { applications: true } } },
+    include: {
+      client: true,
+      recruiter: true,
+      bde: true,
+      applications: { select: { stage: true } },
+      _count: { select: { applications: true } },
+    },
     orderBy: { createdAt: 'desc' },
+  });
+
+  // Openings / Filled / Remaining, which the prototype's Open Requirements
+  // tab (openRequirementsHtml, line 6832) shows as their own columns.
+  const requirements = found.map((r) => {
+    const filled = r.applications.filter((a) => ['JOINED', 'HIRED'].includes(a.stage)).length;
+    const { applications, ...rest } = r;
+    return { ...rest, filled, remaining: Math.max(0, (r.openings || 1) - filled) };
   });
 
   // How many candidates in the master list clear the match threshold for each
@@ -103,6 +117,9 @@ function pickRequirement(body) {
     if (body[key] === undefined) continue;
     if (key === 'openings') data.openings = Number(body.openings) || 1;
     else if (key === 'internal') data.internal = Boolean(body.internal);
+    // "— Not assigned —" arrives as an empty string; a relation field has to be
+    // null, not '', or the write fails on a foreign key that does not exist.
+    else if (['recruiterId', 'bdeId'].includes(key)) data[key] = body[key] || null;
     else data[key] = body[key];
   }
   return data;

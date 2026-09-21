@@ -1,0 +1,128 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import api from '../../api';
+import { useAuth } from '../../context/AuthContext.jsx';
+
+// The prototype's atsDashboard() (line 6252): a six-tile statbar, then a
+// two-column split with "Pipeline by stage" on the left and "Recruiter
+// workload" + "Job Portal Integration" stacked on the right.
+//
+// The prototype lists the pipeline stages in ATS_STAGES order and then
+// "Hold, Rejected"; its candidate filter uses the opposite order. The backend
+// already returns them in the dashboard's own order, which is what is used here.
+export default function AtsDashboard() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [data, setData] = useState(null);
+  const [synced, setSynced] = useState(null);
+
+  function load() {
+    api.get('/dashboard').then((res) => setData(res.data));
+    api.get('/candidates')
+      .then((res) => setSynced(res.data.filter((c) => ['Job Portal', 'TeamLink Website'].includes(c.source)).length))
+      .catch(() => setSynced(null));
+  }
+  useEffect(load, []);
+
+  if (!data) return <div className="small-muted">Loading…</div>;
+
+  const isClient = user?.role === 'CLIENT';
+  const stats = [
+    [data.openRequirements, 'Open requirements'],
+    [data.recruiterReview, 'Recruiter review'],
+    [data.withBde, 'With BDE'],
+    [data.clientReview, 'Client review'],
+    [data.interviewsUpcoming, 'Interviews upcoming'],
+    [data.hiringOutcomes, 'Hiring outcomes this cycle'],
+  ];
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1>ATS Dashboard</h1>
+          <div className="page-sub">Recruitment pipeline overview</div>
+        </div>
+      </div>
+
+      <div className="statbar">
+        {stats.map(([n, l]) => (
+          <div className="statitem" key={l}>
+            <div className="n">{n ?? 0}</div>
+            <div className="l">{l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="two-col">
+        <div className="card section">
+          <h3 style={{ fontSize: 14, marginBottom: 10 }}>Pipeline by stage</h3>
+          <div className="tbl-wrap">
+            <table>
+              <thead><tr><th>Stage</th><th>Candidates</th></tr></thead>
+              <tbody>
+                {(data.pipelineByStage || []).map((s) => (
+                  <tr
+                    key={s.stage}
+                    className="row-link"
+                    onClick={() => navigate(`/candidates?stage=${encodeURIComponent(s.stage)}`)}
+                  >
+                    <td>{s.label}</td>
+                    <td>{s.count}</td>
+                  </tr>
+                ))}
+                {(data.pipelineByStage || []).length === 0 && (
+                  <tr><td colSpan="2" className="small-muted" style={{ padding: 16 }}>No candidates in the pipeline yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <div className="card section">
+            <h3 style={{ fontSize: 13, marginBottom: 10 }}>Recruiter workload</h3>
+            {(data.recruiterWorkload || []).map((r) => (
+              <div className="kv" key={r.name}>
+                <span className="k">{r.name}</span>
+                <span>{r.requirements} requirements</span>
+              </div>
+            ))}
+            {(data.recruiterWorkload || []).length === 0 && (
+              <div className="small-muted">No recruiters on file.</div>
+            )}
+          </div>
+
+          {!isClient && (
+            <div className="card">
+              <h3 style={{ fontSize: 13, marginBottom: 10 }}>Job Portal Integration</h3>
+              <div className="kv">
+                <span className="k">Connection</span>
+                <span><span className="conn-dot ok" />Connected</span>
+              </div>
+              <div className="kv">
+                <span className="k">Last Sync</span>
+                <span>Live — applications land in the pipeline as they are submitted</span>
+              </div>
+              <div className="kv">
+                <span className="k">Candidates Synced</span>
+                <span>{synced ?? '—'}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button className="btn btn-sm btn-primary" onClick={load}>Sync</button>
+                <a className="btn btn-sm" href="/careers" target="_blank" rel="noreferrer">Open Job Portal ↗</a>
+              </div>
+              <span
+                className="link-btn"
+                style={{ display: 'block', marginTop: 8, cursor: 'pointer' }}
+                onClick={() => navigate('/admin/integrations')}
+              >
+                Full integration details →
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

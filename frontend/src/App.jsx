@@ -10,6 +10,7 @@ import Clients from './pages/Clients.jsx';
 import ClientDetail from './pages/ClientDetail.jsx';
 import Candidates from './pages/Candidates.jsx';
 import CandidateDetail from './pages/CandidateDetail.jsx';
+import AtsDashboard from './pages/ats/AtsDashboard.jsx';
 import Team from './pages/ats/Team.jsx';
 import InterviewCalendar from './pages/ats/InterviewCalendar.jsx';
 import Search from './pages/ats/Search.jsx';
@@ -95,10 +96,7 @@ export default function App() {
         <Route path="ats/team" element={<Team />} />
         <Route path="ats/calendar" element={<InterviewCalendar />} />
         <Route path="ats/search" element={<Search />} />
-        {/* The prototype's ATS sidebar opens on its own ATS dashboard screen,
-            which is not built here yet — the entry lands on the main dashboard,
-            which already carries the prototype's six ATS tiles. */}
-        <Route path="ats/dashboard" element={<Dashboard />} />
+        <Route path="ats/dashboard" element={<AtsDashboard />} />
 
         {/* Accounts */}
         <Route path="invoices" element={<Invoices />} />
