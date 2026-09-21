@@ -13,9 +13,19 @@ const STATE_CLASS = {
   Ignored: '',
 };
 
+// What the narration reading made of a credit, in the accounting application's
+// own confidence vocabulary.
+const READ_CLASS = {
+  'client named': 'priority-low',
+  'amount only — check': 'priority-medium',
+  'several match': 'priority-medium',
+  'no match': 'priority-high',
+};
+
 export default function Bank() {
   const [transactions, setTransactions] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [position, setPosition] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [state, setState] = useState('All');
   const [picked, setPicked] = useState({}); // txnId -> invoiceId chosen for a manual match
@@ -30,10 +40,12 @@ export default function Bank() {
       api.get('/bank'),
       api.get('/bank/summary'),
       api.get('/invoices'),
-    ]).then(([t, s, i]) => {
+      api.get('/bank/position'),
+    ]).then(([t, s, i, p]) => {
       setTransactions(t.data);
       setSummary(s.data);
       setInvoices(i.data);
+      setPosition(p.data);
     });
   }, []);
   useEffect(load, [load]);
@@ -89,6 +101,55 @@ export default function Bank() {
         </button>
       </div>
 
+      {/* Banking Overview: the statement against the books. "Amount in bank" is
+          the closing balance printed on the last line imported; "Amount in the
+          books" is every line imported added up. Where they differ, a statement
+          is missing. */}
+      {position && (
+        <div className="card section">
+          <h3>Banking Overview</h3>
+          <div className="small-muted" style={{ marginBottom: 10 }}>
+            {position.lines} statement line(s) on file{position.firstLine ? ` · ${position.firstLine} to ${position.lastLine}` : ''}
+          </div>
+          <div className="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Account</th><th className="num">Uncategorised</th><th className="num">Amount in bank</th>
+                  <th className="num">Amount in the books</th><th className="num">Difference</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <b>Statement on file</b>
+                    <div className="small-muted">
+                      {position.credits
+                        ? `opening ${money(position.opening)} · ${money(position.credits)} in · ${money(position.debits)} out`
+                        : 'nothing imported yet'}
+                    </div>
+                  </td>
+                  <td className="num">
+                    {summary?.unmatched
+                      ? <span className="status priority-high">{summary.unmatched} transaction{summary.unmatched === 1 ? '' : 's'}</span>
+                      : <span className="status priority-low">all filed</span>}
+                  </td>
+                  <td className="num">{position.inBank == null ? <span className="small-muted">no balance column</span> : money(position.inBank)}</td>
+                  <td className="num">{money(position.inBooks)}</td>
+                  <td className="num" style={{ fontWeight: 700, color: position.difference == null ? undefined : Math.abs(position.difference) < 1 ? 'var(--teal)' : 'var(--red)' }}>
+                    {position.difference == null ? '—' : `${position.difference < 0 ? '−' : ''}${money(Math.abs(position.difference))}`}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div className="small-muted" style={{ marginTop: 8 }}>
+            <b>Amount in bank</b> is the closing balance printed on the last statement you imported.
+            <b> Amount in the books</b> is every line imported added up. Where they differ, a statement is missing.
+          </div>
+        </div>
+      )}
+
       {summary && (
         <div className="statbar">
           <Stat n={summary.unmatched} l="Unmatched" />
@@ -97,6 +158,21 @@ export default function Bank() {
           <Stat n={summary.ignored} l="Ignored" />
           <Stat n={money(summary.unmatchedValue)} l="Still to deal with" />
           <Stat n={money(summary.netMovement)} l="Net movement" />
+          {position && <Stat n={position.openInvoices} l="Open invoices" />}
+          {position && <Stat n={money(position.openInvoiceValue)} l="Still to be collected" />}
+        </div>
+      )}
+
+      {/* What the narration reading made of everything still unmatched. */}
+      {position && summary?.unmatched > 0 && (
+        <div className="notice">
+          <span>
+            Of the {summary.unmatched} unmatched line(s):
+            {' '}<b>{position.reading['client named']}</b> name a client,
+            {' '}<b>{position.reading['amount only — check']}</b> fit one invoice on amount alone,
+            {' '}<b>{position.reading['several match']}</b> could be several invoices, and
+            {' '}<b>{position.reading['no match']}</b> have no match at all.
+          </span>
         </div>
       )}
 
@@ -136,8 +212,9 @@ export default function Bank() {
         <table>
           <thead>
             <tr>
-              <th>Date</th><th>Description</th><th>In / Out</th><th>Amount</th>
-              <th>State</th><th>Matched to</th><th style={{ minWidth: 300 }}>Action</th>
+              <th>Date</th><th>Statement details</th><th className="num">Withdrawals</th><th className="num">Deposits</th>
+              <th className="num">Bank says</th><th className="num">This app says</th><th className="num">Difference</th>
+              <th>Against</th><th>State</th><th style={{ minWidth: 300 }}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -145,18 +222,41 @@ export default function Bank() {
               <tr key={t.id}>
                 <td>{t.date}</td>
                 <td>
-                  {t.description}
-                  {t.reference && <div className="small-muted">Ref {t.reference}</div>}
+                  <span className="small-muted">Description: </span>{t.description}
+                  {t.reference && <div className="small-muted">Ref# {t.reference}</div>}
                 </td>
-                <td>{t.type}</td>
-                <td>{money(t.amount)}</td>
-                <td><span className={`status ${STATE_CLASS[t.state] || ''}`}>{t.state}</span></td>
+                <td className="num">{t.type === 'Debit' ? money(t.amount) : '—'}</td>
+                <td className="num" style={{ color: t.type === 'Credit' ? 'var(--teal)' : undefined }}>{t.type === 'Credit' ? money(t.amount) : '—'}</td>
+                <td className="num">{t.balance == null ? '—' : money(t.balance)}</td>
+                <td className="num">{t.runningBalance == null ? '—' : money(t.runningBalance)}</td>
+                <td className="num">
+                  {t.balance == null || t.runningBalance == null
+                    ? '—'
+                    : <b style={{ color: Math.abs(t.balance - t.runningBalance) < 1 ? 'var(--teal)' : 'var(--red)' }}>{money(t.balance - t.runningBalance)}</b>}
+                </td>
                 <td>
                   {t.matchedInvoice ? (
                     <>
                       <div>{t.matchedInvoice.invoiceNumber || '—'}</div>
                       <div className="small-muted">{t.matchedInvoice.client}</div>
                       {t.matchedBy && <div className="small-muted">by {t.matchedBy} · {t.matchedDate}</div>}
+                    </>
+                  ) : t.read && t.type === 'Credit' ? (
+                    <>
+                      <span className={`status ${READ_CLASS[t.read.kind] || ''}`}>{t.read.kind}</span>
+                      {t.read.client && <div><b>{t.read.client}</b></div>}
+                      <div className="small-muted">{t.read.why}</div>
+                      {t.read.plan?.parts?.length > 1 && (
+                        <div className="small-muted">
+                          oldest first: {t.read.plan.parts.map((p) => `${p.invoiceNumber} ${money(p.amount)}`).join(' · ')}
+                        </div>
+                      )}
+                      {t.suggestion && (
+                        <div className="small-muted">
+                          Suggested: {t.suggestion.invoiceNumber} · {t.suggestion.client}
+                          {t.suggestion.diff > 0 ? ` (${money(t.suggestion.diff)} out)` : ' (exact)'}
+                        </div>
+                      )}
                     </>
                   ) : t.suggestion ? (
                     <div className="small-muted">
@@ -169,6 +269,7 @@ export default function Bank() {
                     <span className="small-muted">—</span>
                   )}
                 </td>
+                <td><span className={`status ${STATE_CLASS[t.state] || ''}`}>{t.state}</span></td>
                 <td>
                   <Actions
                     txn={t}
@@ -182,7 +283,7 @@ export default function Bank() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan="7" className="small-muted">Nothing in this state.</td></tr>
+              <tr><td colSpan="10" className="small-muted">Nothing in this state.</td></tr>
             )}
           </tbody>
         </table>

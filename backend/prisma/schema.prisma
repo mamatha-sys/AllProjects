@@ -693,6 +693,17 @@ model Invoice {
   bankTxnId       String?
   notes           String?
 
+  // Invoice register depth — the prototype's "Sent" and "TDS certificate"
+  // columns, and the GST / TDS rate actually applied to this one invoice
+  // (a client's standing rate can be overridden per deal).
+  sentVia         String?
+  sentDate        String?
+  tdsCertReceived Boolean   @default(false)
+  tdsCertRef      String?
+  tdsCertDate     String?
+  gstPercent      Float?
+  tdsPercent      Float?
+
   payments        InvoicePayment[]
 }
 
@@ -749,6 +760,18 @@ model OfficeExpense {
   paidStatus    String   @default("Paid") // Paid | Unpaid
   recurring     Boolean  @default(true)
   notes         String?
+
+  // Office & Business depth — TDS the office deducted from the vendor, the
+  // amortisation window behind "Amortised" in the month summary, and the
+  // vendor GSTIN without which the input credit cannot be claimed.
+  tdsAmount     Float    @default(0)
+  frequency     String?  @default("Monthly")
+  monthsCovered Int?
+  vendorGstin   String?
+  paymentMode   String?  @default("Bank Transfer")
+  description   String?
+  // The vendor's own invoice number — what a GST return is reconciled against.
+  billNumber    String?
 }
 
 // =============================================================================

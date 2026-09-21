@@ -68,12 +68,61 @@ export default function InvoiceDetail() {
 
       <div className="card section">
         <h3>What it is worth</h3>
-        <div className="kv"><span className="k">Amount</span><span>{money(invoice.amount)}</span></div>
-        <div className="kv"><span className="k">GST</span><span>+ {money(invoice.gst)}</span></div>
-        <div className="kv"><span className="k">TDS deducted at source</span><span>− {money(invoice.tds)}</span></div>
-        <div className="kv"><span className="k">Total payable</span><span style={{ fontWeight: 700 }}>{money(invoice.total)}</span></div>
+        <div className="kv"><span className="k">Fee before GST</span><span>{money(invoice.amount)}</span></div>
+        <div className="kv">
+          <span className="k">GST{invoice.gstPercent ?? invoice.client?.gstPercent ? ` @ ${invoice.gstPercent ?? invoice.client?.gstPercent}%` : ''}</span>
+          <span>+ {money(invoice.gst)}</span>
+        </div>
+        <div className="kv"><span className="k">After GST</span><span>{money(Number(invoice.amount || 0) + Number(invoice.gst || 0))}</span></div>
+        <div className="kv">
+          <span className="k">TDS deducted at source{invoice.tdsPercent ?? invoice.client?.tdsPercent ? ` @ ${invoice.tdsPercent ?? invoice.client?.tdsPercent}%` : ''}</span>
+          <span>− {money(invoice.tds)}</span>
+        </div>
+        <div className="kv"><span className="k">Receivable</span><span style={{ fontWeight: 700 }}>{money(invoice.total)}</span></div>
         <div className="kv"><span className="k">Received</span><span>{money(invoice.receivedAmount)}</span></div>
-        <div className="kv"><span className="k">Outstanding</span><span style={{ fontWeight: 700 }}>{money(invoice.outstanding)}</span></div>
+        <div className="kv"><span className="k">Pending</span><span style={{ fontWeight: 700 }}>{money(invoice.outstanding)}</span></div>
+        <div className="small-muted" style={{ marginTop: 8 }}>
+          GST rides on top of the fee at the client&apos;s own rate and is collected for Government; TDS is
+          deducted at source by the client, so it never reaches the bank.
+        </div>
+      </div>
+
+      {/* The two things that stay open after an invoice is raised: getting it
+          to the client, and getting Form 16A back for the TDS they deducted. */}
+      <div className="card section">
+        <h3>Sent &amp; TDS certificate</h3>
+        <div className="kv">
+          <span className="k">Sent</span>
+          <span>
+            {invoice.sentVia
+              ? <span className="status priority-low">{invoice.sentVia} · {invoice.sentDate}</span>
+              : <span className="status">Not sent</span>}
+            {canManage && (
+              <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => run(() => api.patch(`/invoices/${id}/sent`, { via: 'Email' }))}>
+                {invoice.sentVia ? 'Send again' : 'Mark sent'}
+              </button>
+            )}
+          </span>
+        </div>
+        <div className="kv">
+          <span className="k">TDS certificate (Form 16A)</span>
+          <span>
+            {Number(invoice.tds || 0) <= 0.5
+              ? <span className="small-muted">No TDS was deducted on this invoice</span>
+              : (
+                <>
+                  <span className={`status ${invoice.tdsCertReceived ? 'priority-low' : 'priority-high'}`}>
+                    {invoice.tdsCertReceived ? `in hand${invoice.tdsCertRef ? ` · ${invoice.tdsCertRef}` : ''}` : 'to collect'}
+                  </span>
+                  {canManage && (
+                    <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => run(() => api.patch(`/invoices/${id}/tds-certificate`, { received: !invoice.tdsCertReceived }))}>
+                      {invoice.tdsCertReceived ? 'Undo' : 'Got it'}
+                    </button>
+                  )}
+                </>
+              )}
+          </span>
+        </div>
       </div>
 
       <div className="card section">
