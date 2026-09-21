@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../../api';
+import Modal from '../../components/Modal.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { ATS_ROLE_LABELS, atsRoleLabel, DEPTS } from '../../atsVocab';
 
@@ -46,6 +47,9 @@ export default function Users() {
   const [filters, setFilters] = useState({ q: '', role: '', status: '', department: '' });
   const [resetFor, setResetFor] = useState(null);
   const [resetPassword, setResetPassword] = useState('');
+  // Branch / team / scope are read-only text in the table (as in the prototype);
+  // this modal is where main's inline editing of them moved to.
+  const [editing, setEditing] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -90,8 +94,12 @@ export default function Users() {
       `${u.name} — role: ${atsRoleLabel(u.role)} → ${atsRoleLabel(role)} (same login, no new account).`);
   }
 
-  function changeField(u, patch, message) {
-    run(() => api.put(`/admin/users/${u.id}`, patch), message);
+  async function saveEditing() {
+    const ok = await run(
+      () => api.put(`/admin/users/${editing.id}`, { branch: editing.branch, team: editing.team, atsDepartment: editing.atsDepartment || null }),
+      `${editing.name} updated.`,
+    );
+    if (ok) setEditing(null);
   }
 
   function toggleStatus(u) {
@@ -137,12 +145,11 @@ export default function Users() {
         <div>
           <h1>Users</h1>
           <div className="page-sub">
-            One employee = one user = one login. Changing a role here takes effect on that user&apos;s
-            next login — it never creates a second account.
+            One employee = one user = one login. HRMS, ATS and Accounts roles are independent on the same account.
           </div>
         </div>
         <button className="btn btn-primary" onClick={() => setShowForm((s) => !s)}>
-          {showForm ? 'Cancel' : 'Create login'}
+          {showForm ? 'Cancel' : 'Add User'}
         </button>
       </div>
 
@@ -242,12 +249,15 @@ export default function Users() {
       <div className="tbl-wrap">
         <table>
           <thead>
+            {/* The prototype's fifteen columns, in its order (usersView, line
+                9911). Username, Role and Actions are main-only and appended. */}
             <tr>
-              <th>User ID</th><th>Employee ID</th><th>Employee Name</th><th>Username</th>
+              <th>User ID</th><th>Employee ID</th><th>Employee Name</th>
               <th>Department</th><th>Branch</th><th>Team</th>
-              <th>Role</th><th>HRMS</th><th>ATS</th><th>Accounts</th>
+              <th>HRMS Role</th><th>ATS Role</th><th>Accounts Role</th>
               <th>Status</th><th>Scope</th><th>Assigned Clients</th>
-              <th>Assigned Requirements</th><th>Last Login</th><th>Actions</th>
+              <th>Assigned Requirements</th><th>Assigned Team</th><th>Last Login</th>
+              <th>Username</th><th>Role</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -261,37 +271,29 @@ export default function Users() {
                     : u.name}
                   <div className="small-muted" style={{ fontSize: 11 }}>{u.email}</div>
                 </td>
-                <td className="small-muted">{u.username || '—'}</td>
-                <td className="small-muted">{u.department || '—'}</td>
+                <td className="cell-muted">{u.department || '—'}</td>
+                <td className="cell-muted">{u.branch || '—'}</td>
+                <td className="cell-muted">{u.team || '—'}</td>
+                {/* The prototype has three editable selects here. Main stores one
+                    role, so these three show its derived product access and the
+                    editable select is the appended "Role" column. */}
+                <td><select style={{ minWidth: 120 }} value={u.productAccess?.hrms || 'No Access'} disabled readOnly><option>{u.productAccess?.hrms || 'No Access'}</option></select></td>
+                <td><select style={{ minWidth: 120 }} value={u.productAccess?.ats || 'No Access'} disabled readOnly><option>{u.productAccess?.ats || 'No Access'}</option></select></td>
+                <td><select style={{ minWidth: 120 }} value={u.productAccess?.accounts || 'No Access'} disabled readOnly><option>{u.productAccess?.accounts || 'No Access'}</option></select></td>
+                <td><span className={'status ' + statusClass(u.status)}>{u.status}</span></td>
+                <td className="cell-muted">{u.scope}</td>
+                <td className="cell-muted">{u.assignedClients?.length ? u.assignedClients.join(', ') : '—'}</td>
+                <td className="cell-muted">{u.assignedRequirements}</td>
+                <td className="cell-muted">{u.team || u.atsDepartment || '—'}</td>
+                <td className="cell-muted">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}</td>
+                <td className="cell-muted">{u.username || '—'}</td>
                 <td>
-                  <input
-                    style={{ minWidth: 100 }}
-                    defaultValue={u.branch || ''}
-                    onBlur={(e) => e.target.value !== (u.branch || '') && changeField(u, { branch: e.target.value }, `${u.name} — branch updated.`)}
-                  />
-                </td>
-                <td>
-                  <input
-                    style={{ minWidth: 100 }}
-                    defaultValue={u.team || ''}
-                    onBlur={(e) => e.target.value !== (u.team || '') && changeField(u, { team: e.target.value }, `${u.name} — team updated.`)}
-                  />
-                </td>
-                <td>
-                  {/* One select today. Three go here when hrmsRole/atsRole/accountsRole land. */}
                   <select style={{ minWidth: 130 }} value={u.role} onChange={(e) => changeRole(u, e.target.value)}>
                     {ROLES.map((r) => <option key={r} value={r}>{atsRoleLabel(r)}</option>)}
                   </select>
                 </td>
-                <td className="small-muted">{u.productAccess?.hrms || '—'}</td>
-                <td className="small-muted">{u.productAccess?.ats || '—'}</td>
-                <td className="small-muted">{u.productAccess?.accounts || '—'}</td>
-                <td><span className={'status ' + statusClass(u.status)}>{u.status}</span></td>
-                <td className="small-muted">{u.scope}</td>
-                <td className="small-muted">{u.assignedClients?.length ? u.assignedClients.join(', ') : '—'}</td>
-                <td className="small-muted">{u.assignedRequirements}</td>
-                <td className="small-muted">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : 'Never'}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
+                  <button className="btn btn-sm" onClick={() => setEditing({ id: u.id, name: u.name, branch: u.branch || '', team: u.team || '', atsDepartment: u.atsDepartment || '' })}>Edit</button>{' '}
                   <button className="btn btn-sm" disabled={u.id === me?.id} onClick={() => toggleStatus(u)}>
                     {u.status === 'Active' ? 'Disable' : 'Enable'}
                   </button>{' '}
@@ -301,17 +303,38 @@ export default function Users() {
                 </td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan="17" className="small-muted" style={{ padding: 16 }}>No logins match these filters.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan="18" className="small-muted" style={{ padding: 16 }}>No logins match these filters.</td></tr>}
           </tbody>
         </table>
       </div>
 
-      <div className="card section" style={{ marginTop: 14 }}>
-        An employee created in HRMS keeps one login for life — granting them an additional product role
-        adds reach to that same account rather than issuing a second one. HRMS, ATS and Accounts are
-        shown here as derived from the single stored role; they become independently editable when the
-        three-role split lands.
+      <div className="notice" style={{ marginTop: 14 }}>
+        Changing a role here takes effect on that user&apos;s next login — it never creates a second account.
+        An employee created in HRMS is linked to a user automatically; assigning an ATS or Accounts role adds
+        product access to that same login. HRMS, ATS and Accounts are shown here derived from the single stored
+        role; they become independently editable when the three-role split lands.
       </div>
+
+      {editing && (
+        <Modal
+          title={`Edit — ${editing.name}`}
+          onClose={() => setEditing(null)}
+          foot={<>
+            <button className="btn" onClick={() => setEditing(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveEditing}>Save</button>
+          </>}
+        >
+          <div className="field"><label>Branch</label>
+            <input value={editing.branch} onChange={(e) => setEditing({ ...editing, branch: e.target.value })} /></div>
+          <div className="field"><label>Assigned team</label>
+            <input value={editing.team} onChange={(e) => setEditing({ ...editing, team: e.target.value })} placeholder="e.g. Section A" /></div>
+          <div className="field"><label>ATS department scope</label>
+            <select value={editing.atsDepartment} onChange={(e) => setEditing({ ...editing, atsDepartment: e.target.value })}>
+              <option value="">All departments</option>
+              {DEPTS.map((d) => <option key={d}>{d}</option>)}
+            </select></div>
+        </Modal>
+      )}
     </div>
   );
 }

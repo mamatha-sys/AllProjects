@@ -1,7 +1,10 @@
-// The prototype's openModal() renders `.overlay.show > .modal[.wide|.xwide]`
-// with a `.modal-head` / `.modal-body` / `.modal-foot` stack. Every Add / Edit
-// form in the ATS module is one of these, so the markup lives here once.
-export default function Modal({ title, size, onClose, children, footer, bodyStyle }) {
+// The prototype's openModal() markup as a component: .overlay.show > .modal
+// (optionally .wide / .xwide) > .modal-head / .modal-body / .modal-foot.
+// See teamlink-enterprise_69.html openModal(), and .overlay in styles.css.
+// `footer` and `foot` are the same slot under two names — the ATS and
+// Administration screens were written against different ones.
+export default function Modal({ title, note, size, onClose, children, footer, foot, bodyStyle }) {
+  const footContent = footer ?? foot;
   return (
     <div
       className="overlay show"
@@ -10,10 +13,11 @@ export default function Modal({ title, size, onClose, children, footer, bodyStyl
       <div className={`modal${size ? ` ${size}` : ''}`}>
         <div className="modal-head">
           <h3 style={{ fontSize: 15 }}>{title}</h3>
+          {note && <div className="cell-muted" style={{ fontSize: 11.5, marginLeft: 'auto', marginRight: 10 }}>{note}</div>}
           <button type="button" className="close-x" onClick={onClose}>×</button>
         </div>
         <div className="modal-body" style={bodyStyle}>{children}</div>
-        {footer && <div className="modal-foot">{footer}</div>}
+        {footContent && <div className="modal-foot">{footContent}</div>}
       </div>
     </div>
   );

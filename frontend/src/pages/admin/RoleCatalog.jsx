@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../../api';
+import Modal from '../../components/Modal.jsx';
 import { atsRoleLabel } from '../../atsVocab';
 
 // Role Catalog (the prototype's roleCatalogView + openEditAccess +
@@ -97,85 +98,70 @@ export default function RoleCatalog() {
       <div className="page-head">
         <div>
           <h1>Role Catalog</h1>
-          <div className="page-sub">
-            Real user counts per role. Open Edit Access to configure which modules and features a role reaches.
-          </div>
+          <div className="page-sub">Real user counts per role. Click Edit Access to configure a role&apos;s page access.</div>
         </div>
       </div>
 
       {error && <div className="error-text">{error}</div>}
-      {notice && <div className="card section" style={{ marginBottom: 14 }}>{notice}</div>}
+      {notice && <div className="notice" style={{ marginBottom: 12 }}>{notice}</div>}
 
-      <div className="tbl-wrap">
-        <table>
-          <thead>
-            <tr><th>Role</th><th>Users</th><th>Scope</th><th>Modules enabled</th><th>Access</th><th>Actions</th></tr>
-          </thead>
-          <tbody>
-            {roles.map((r) => (
-              <tr key={r.role}>
-                <td><b>{atsRoleLabel(r.role)}</b></td>
-                <td className="small-muted">{r.users} user{r.users === 1 ? '' : 's'}</td>
-                <td className="small-muted">{r.scope}</td>
-                <td className="small-muted">{r.modules.filter((m) => m.enabled).length} / {r.modules.length}</td>
-                <td className="small-muted">{r.access}</td>
-                <td>
-                  <button className="btn btn-sm" onClick={() => openEditAccess(r.role)}>Edit Access</button>
-                </td>
-              </tr>
-            ))}
-            {roles.length === 0 && <tr><td colSpan="6" className="small-muted" style={{ padding: 16 }}>No roles.</td></tr>}
-          </tbody>
-        </table>
+      <div className="panel">
+        {roles.map((r) => (
+          <div className="assign-row" key={r.role}>
+            <span>
+              <b>{atsRoleLabel(r.role)} · {r.users} user{r.users === 1 ? '' : 's'}</b>
+              <br />
+              <span className="cell-muted" style={{ fontSize: 12 }}>{r.scope || '—'}</span>
+            </span>
+            <button className="btn btn-sm" onClick={() => openEditAccess(r.role)}>Edit Access</button>
+          </div>
+        ))}
+        {roles.length === 0 && <div className="empty-mini">No roles.</div>}
+      </div>
+
+      <div className="notice" style={{ marginTop: 12 }}>
+        Page access is stored per role and edited here. NOTE: it is not yet enforced — no route or navigation
+        reads it. Enforcement is entangled with the deferred three-role split and lands with it.
       </div>
 
       {editing && !configuring && (
-        <div className="card section" style={{ marginTop: 16 }}>
-          <div className="page-head" style={{ marginBottom: 8 }}>
-            <div>
-              <h3>Edit Access — {atsRoleLabel(editing.role)}</h3>
-              <div className="page-sub">{editing.scope}</div>
+        <Modal
+          title={`Edit Access — ${atsRoleLabel(editing.role)}`}
+          size="xwide"
+          onClose={() => setEditing(null)}
+          foot={<button className="btn btn-primary" onClick={() => setEditing(null)}>Done</button>}
+        >
+          <div className="cell-muted" style={{ fontSize: 12.5, marginBottom: 12 }}>
+            Toggle module access, or click Configure for feature-level detail.
+          </div>
+          {editing.modules.map((m) => (
+            <div className="assign-row" key={m.id}>
+              <label style={{ display: 'flex', gap: 9, alignItems: 'center', flex: 1, cursor: 'pointer' }}>
+                <input
+                  type="checkbox" style={{ width: 'auto' }}
+                  checked={!!m.moduleEnabled}
+                  onChange={(e) => toggleModule(m.id, e.target.checked)}
+                />
+                {m.label}
+              </label>
+              <button className="btn btn-sm" onClick={() => openConfigure(m.id)}>Configure →</button>
             </div>
-            <button className="btn btn-sm btn-ghost" onClick={() => setEditing(null)}>Close</button>
-          </div>
-          <div className="small-muted" style={{ marginBottom: 12 }}>
-            Toggle module access, or open Configure for feature-level detail. A module toggle saves immediately.
-          </div>
-          <div className="tbl-wrap">
-            <table>
-              <thead><tr><th>Module</th><th>Features</th><th>Enabled</th><th>Actions</th></tr></thead>
-              <tbody>
-                {editing.modules.map((m) => (
-                  <tr key={m.id}>
-                    <td><b>{m.label}</b></td>
-                    <td className="small-muted">{m.featureNames.length} feature{m.featureNames.length === 1 ? '' : 's'}</td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        style={{ width: 'auto' }}
-                        checked={!!m.moduleEnabled}
-                        onChange={(e) => toggleModule(m.id, e.target.checked)}
-                      />
-                    </td>
-                    <td><button className="btn btn-sm" onClick={() => openConfigure(m.id)}>Configure →</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+          ))}
+        </Modal>
       )}
 
       {editing && mod && (
-        <div className="card section" style={{ marginTop: 16 }}>
-          <div className="page-head" style={{ marginBottom: 8 }}>
-            <div>
-              <h3>Configure — {mod.label}</h3>
-              <div className="page-sub">
-                {mod.featureNames.length} feature(s) · {atsRoleLabel(editing.role)}
-              </div>
-            </div>
-            <button className="btn btn-sm btn-ghost" onClick={() => setConfiguring(null)}>← Back to modules</button>
+        <Modal
+          title={`Configure — ${mod.label}`}
+          size="xwide"
+          onClose={() => setConfiguring(null)}
+          foot={<>
+            <button className="btn" onClick={() => setConfiguring(null)}>← Back to modules</button>
+            <button className="btn btn-primary" onClick={saveFeatures}>Save changes</button>
+          </>}
+        >
+          <div className="cell-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            {mod.featureNames.length} feature(s) · {atsRoleLabel(editing.role)}
           </div>
           <div className="tbl-wrap">
             <table>
@@ -183,6 +169,7 @@ export default function RoleCatalog() {
                 <tr>
                   <th>Feature</th>
                   {editing.actions.map((a) => <th key={a} style={{ textAlign: 'center' }}>{a.toUpperCase()}</th>)}
+                  {/* main-only: a row-level all/none shortcut over the prototype's seven boxes. */}
                   <th style={{ textAlign: 'center' }}>ALL</th>
                 </tr>
               </thead>
@@ -209,11 +196,7 @@ export default function RoleCatalog() {
               </tbody>
             </table>
           </div>
-          <div style={{ marginTop: 12 }}>
-            <button className="btn btn-primary btn-sm" onClick={saveFeatures}>Save changes</button>{' '}
-            <button className="btn btn-sm" onClick={() => setConfiguring(null)}>Discard</button>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

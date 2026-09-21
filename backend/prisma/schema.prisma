@@ -353,6 +353,11 @@ model Employee {
   phone             String?
   department        String?
   team              String?
+  // The prototype's Employee Management table has STL and TL columns. In the
+  // prototype no create path ever writes them (a bug); here the Add Employee
+  // form and the Assign Roles modal actually persist them.
+  stl               String?
+  tl                String?
   designation       String?
   location          String?
   dateOfJoining     DateTime?
@@ -920,6 +925,10 @@ model Company {
   email   String?
   phone   String?
   address String?
+  // Company Setup (prototype companySetupView, line 9693) also carries the
+  // headquarters line and the list of employment policies.
+  hq       String?
+  policies String? // JSON array of policy names, each shown with an Active chip
 }
 
 model Notification {
@@ -930,6 +939,11 @@ model Notification {
   message   String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+  // The prototype's Notifications screen is a central event log across
+  // Email / WhatsApp / SMS / In-App (notificationsView, line 10575).
+  channel   String?  // Email | WhatsApp | SMS | In-App
+  recipient String?  // who the event was addressed to
+  status    String?  // Sent (Demo) | Delivered | Failed | Read
 }
 
 // Role Catalog "Edit Access" — one row per (role, module). `moduleEnabled` is
@@ -967,4 +981,69 @@ model Asset {
   history       String    @default("[]") // JSON array of {at, by, text}
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Administration additions (prototype parity pass)
+// ---------------------------------------------------------------------------
+
+// Organization Structure -> approval & escalation workflow (prototype
+// adminOrgStructureView, and ORG_STRUCTURE_DEFAULT at line 2260). Requests
+// escalate top-to-bottom through this chain; roles can be edited or paused,
+// never deleted.
+model OrgRole {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  system      Boolean  @default(false) // system roles cannot be paused
+  paused      Boolean  @default(false)
+  approveDays Int?     // can approve leave up to N days; longer requests escalate
+  position    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Integrations -> Connections tab. One row per channel in INTEGRATION_CATALOG
+// (prototype line 2189). `id` is the catalog id ("whatsapp", "jobportal", ...).
+model Integration {
+  id             String    @id
+  enabled        Boolean   @default(false)
+  connected      Boolean   @default(false)
+  state          String    @default("Not Connected") // Not Connected | Connected | Expired | Reconnect Required
+  values         String?   // JSON of the channel's credential fields
+  connectedAt    DateTime?
+  lastSync       DateTime?
+  lastTest       DateTime?
+  lastTestResult String?
+  recordsSynced  Int       @default(0)
+  recordsFailed  Int       @default(0)
+  error          String?
+  updatedAt      DateTime  @updatedAt
+
+  events IntegrationEvent[]
+}
+
+// One row per Connect / Disconnect / Test / Sync run — the Sync History modal.
+model IntegrationEvent {
+  id            String      @id @default(cuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id])
+  action        String      // Connected | Disconnected | Test Connection | Sync Now
+  by            String?
+  result        String
+  synced        Int         @default(0)
+  failed        Int         @default(0)
+  entities      String?
+  createdAt     DateTime    @default(now())
+}
+
+// Job Portal Synchronisation -> the Sync Logs table (Date / Entity / Status /
+// Reason). Written by the public Job Portal routes as records come across.
+model SyncLog {
+  id        String   @id @default(cuid())
+  entity    String   // Candidates | Applications | Requirements | Job Status
+  status    String   // Success | Failed
+  reason    String?
+  recordRef String?
+  createdAt DateTime @default(now())
 }
